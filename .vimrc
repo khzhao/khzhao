@@ -1,0 +1,49 @@
+syntax on
+
+set mouse=a
+
+set number
+set linebreak
+set textwidth=250
+set linebreak
+set visualbell
+
+set hlsearch
+set smartcase
+set ignorecase
+
+set shiftwidth=2
+set smartindent
+set smarttab
+set softtabstop=2
+
+set undolevels=9999
+set backspace=indent,eol,start
+
+inoremap { {}<Esc>ha
+set whichwrap+=<,>,[,]
+
+imap FF <Esc>
+
+map <C-j> 5j
+map <C-k> 5k
+map <C-h> 5h
+map <C-l> 5l
+
+set expandtab
+set pastetoggle=<C-p>
+
+nnoremap <C-t> :tabnew<CR>
+nnoremap H gT
+nnoremap L gt
+
+function FormatBuffer()
+  if &modified && !empty(findfile('.clang-format', expand('%:p:h') . ';'))
+    let cursor_pos = getpos('.')
+    :%!clang-format
+    call setpos('.', cursor_pos)
+  endif
+endfunction
+
+autocmd BufWritePre *.h,*.hpp,*.c,*.cpp,*.vert,*.frag :call FormatBuffer()
+colorscheme desert
