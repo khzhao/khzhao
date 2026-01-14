@@ -36,6 +36,7 @@ set pastetoggle=<C-p>
 nnoremap <C-t> :tabnew<CR>
 nnoremap H gT
 nnoremap L gt
+vnoremap <C-r> "hy:%s/<C-r>h//gc<left><left><left>
 
 function FormatBuffer()
   if &modified && !empty(findfile('.clang-format', expand('%:p:h') . ';'))
