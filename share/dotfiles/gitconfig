@@ -1,0 +1,14 @@
+[user]
+	name = Kevin Zhao
+	email = kzhao16@gmail.com
+
+[core]
+	excludesfile = ~/.gitignore_global
+
+[alias]
+	puf = push --force-with-lease
+	ca = commit --amend
+	can = commit --amend --no-edit
+
+[push]
+	autoSetupRemote = true

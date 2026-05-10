@@ -1,0 +1,6 @@
+name|allowed_bases|requires|conflicts|description
+ipykernel|package|||Add IPython kernel support
+ruff|package|||Add Ruff linting and formatting
+pre-commit|package|ruff||Add pre-commit with Ruff hooks
+pyrefly|package|||Add Pyrefly type checking
+pytest|package|||Add pytest tests

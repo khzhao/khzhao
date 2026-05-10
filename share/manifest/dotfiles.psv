@@ -1,0 +1,7 @@
+name|mode|source|target
+vimrc|symlink|share/dotfiles/vimrc|~/.vimrc
+gitconfig|symlink|share/dotfiles/gitconfig|~/.gitconfig
+gitignore_global|symlink|share/dotfiles/gitignore_global|~/.gitignore_global
+tmux|symlink|share/dotfiles/tmux.conf|~/.tmux.conf
+bashrc|block|share/dotfiles/bashrc|~/.bashrc
+zshrc|block|share/dotfiles/zshrc|~/.zshrc

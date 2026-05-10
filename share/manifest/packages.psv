@@ -1,0 +1,5 @@
+name|required|installer|description
+git|yes|system|Git
+curl|yes|system|Download tool
+uv|yes|uv-official|Python script runner
+node|yes|nvm-node|Node runtime and npm

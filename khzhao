@@ -1,0 +1,840 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+die() {
+  echo "khzhao: $*" >&2
+  exit 1
+}
+
+warn() {
+  echo "khzhao: $*" >&2
+}
+
+resolve_script_path() {
+  local source dir link
+  source="${BASH_SOURCE[0]}"
+
+  while [ -L "$source" ]; do
+    dir="$(cd -P "$(dirname "$source")" && pwd)"
+    link="$(readlink "$source")"
+    case "$link" in
+      /*) source="$link" ;;
+      *) source="$dir/$link" ;;
+    esac
+  done
+
+  dir="$(cd -P "$(dirname "$source")" && pwd)"
+  printf '%s/%s\n' "$dir" "$(basename "$source")"
+}
+
+expand_home() {
+  case "$1" in
+    "~") printf '%s\n' "$HOME" ;;
+    "~/"*) printf '%s/%s\n' "$HOME" "${1#\~/}" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
+timestamp_file() {
+  date '+%Y-%m-%dT%H-%M-%S'
+}
+
+timestamp_ledger() {
+  date '+%Y-%m-%dT%H:%M:%S'
+}
+
+contains_path_entry() {
+  case ":$PATH:" in
+    *":$1:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+skip_manifest_row() {
+  [ -z "${1:-}" ] && return 0
+  [ "$1" = "name" ] && return 0
+  case "$1" in
+    \#*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+SCRIPT_PATH="$(resolve_script_path)"
+SCRIPT_DIR="$(cd -P "$(dirname "$SCRIPT_PATH")" && pwd)"
+
+KHZHAO_HOME="${KHZHAO_HOME:-$HOME/.khzhao}"
+if [ -z "${KHZHAO_REPO:-}" ]; then
+  if [ -d "$SCRIPT_DIR/share/manifest" ]; then
+    KHZHAO_REPO="$SCRIPT_DIR"
+  else
+    KHZHAO_REPO="$KHZHAO_HOME/repo"
+  fi
+fi
+
+STATE_DIR="$KHZHAO_HOME/state"
+BACKUP_DIR="$KHZHAO_HOME/backups"
+LOG_DIR="$KHZHAO_HOME/logs"
+TMP_DIR="$KHZHAO_HOME/tmp"
+LOCAL_BIN="$HOME/.local/bin"
+DOTFILES_MANIFEST="$KHZHAO_REPO/share/manifest/dotfiles.psv"
+TASKS_MANIFEST="$KHZHAO_REPO/share/manifest/tasks.psv"
+LEDGER="$STATE_DIR/ledger.psv"
+
+ensure_dirs() {
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "mkdir -p $KHZHAO_HOME/{state,backups,logs,tmp} $LOCAL_BIN"
+    return
+  fi
+
+  mkdir -p \
+    "$STATE_DIR" \
+    "$BACKUP_DIR" \
+    "$LOG_DIR" \
+    "$TMP_DIR" \
+    "$LOCAL_BIN"
+}
+
+append_ledger() {
+  local kind name mode target source backup
+  kind="$1"
+  name="$2"
+  mode="$3"
+  target="$4"
+  source="$5"
+  backup="$6"
+
+  [ "$DRY_RUN" -eq 1 ] && return
+
+  mkdir -p "$STATE_DIR"
+  printf '%s|%s|%s|%s|%s|%s|%s\n' \
+    "$kind" "$name" "$mode" "$target" "$source" "$backup" "$(timestamp_ledger)" \
+    >> "$LEDGER"
+}
+
+backup_target() {
+  local target action backup_root backup_path
+  target="$1"
+  action="$2"
+
+  if [ ! -e "$target" ] && [ ! -L "$target" ]; then
+    return 0
+  fi
+
+  backup_root="$BACKUP_DIR/$(timestamp_file)"
+  backup_path="$backup_root/$(basename "$target")"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    printf '%s\n' "$backup_path"
+    return 0
+  fi
+
+  mkdir -p "$backup_root"
+  if [ -e "$backup_path" ] || [ -L "$backup_path" ]; then
+    backup_path="$backup_path.$$"
+  fi
+
+  case "$action" in
+    move) mv "$target" "$backup_path" ;;
+    copy) cp -pR "$target" "$backup_path" ;;
+    *) die "unknown backup action: $action" ;;
+  esac
+  printf '%s\n' "$backup_path"
+}
+
+same_symlink() {
+  local target source current
+  target="$1"
+  source="$2"
+
+  [ -L "$target" ] || return 1
+  current="$(readlink "$target")"
+  [ "$current" = "$source" ]
+}
+
+ensure_symlink() {
+  local kind name target source backup parent
+  kind="$1"
+  name="$2"
+  target="$3"
+  source="$4"
+
+  parent="$(dirname "$target")"
+
+  if same_symlink "$target" "$source"; then
+    return 0
+  fi
+
+  backup=""
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    backup="$(backup_target "$target" move)"
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "ln -sfn $source $target"
+  else
+    mkdir -p "$parent"
+    ln -sfn "$source" "$target"
+  fi
+
+  append_ledger "$kind" "$name" "symlink" "$target" "$source" "$backup"
+}
+
+block_start() {
+  printf '# >>> khzhao managed: %s >>>\n' "$1"
+}
+
+block_end() {
+  printf '# <<< khzhao managed: %s <<<\n' "$1"
+}
+
+block_count() {
+  local name target start
+  name="$1"
+  target="$2"
+  start="$(block_start "$name")"
+
+  if [ ! -f "$target" ]; then
+    printf '0\n'
+    return
+  fi
+
+  grep -Fxc "$start" "$target" 2>/dev/null || true
+}
+
+remove_block_from_file() {
+  local name target tmp start end
+  name="$1"
+  target="$2"
+
+  [ -f "$target" ] || return 0
+
+  start="$(block_start "$name")"
+  end="$(block_end "$name")"
+  tmp="$TMP_DIR/khzhao-block.$$"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "remove block $name from $target"
+    return 0
+  fi
+
+  mkdir -p "$TMP_DIR"
+  awk -v start="$start" -v end="$end" '
+    $0 == start { skip = 1; next }
+    $0 == end && skip { skip = 0; next }
+    !skip { print }
+  ' "$target" > "$tmp"
+  mv "$tmp" "$target"
+}
+
+managed_source_line() {
+  local rel_source abs_source
+  rel_source="$1"
+  abs_source="$2"
+
+  if [ "$KHZHAO_HOME" = "$HOME/.khzhao" ] && [ "$KHZHAO_REPO" = "$KHZHAO_HOME/repo" ]; then
+    printf 'source "$HOME/.khzhao/repo/%s"\n' "$rel_source"
+  else
+    printf 'source "%s"\n' "$abs_source"
+  fi
+}
+
+append_block_to_file() {
+  local name target body parent
+  name="$1"
+  target="$2"
+  body="$3"
+  parent="$(dirname "$target")"
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "append block $name to $target"
+    return 0
+  fi
+
+  mkdir -p "$parent"
+  {
+    if [ -s "$target" ]; then
+      printf '\n'
+    fi
+    printf '%s\n%s\n%s\n' "$(block_start "$name")" "$body" "$(block_end "$name")"
+  } >> "$target"
+}
+
+ensure_managed_block() {
+  local kind name target source body count backup
+  kind="$1"
+  name="$2"
+  target="$3"
+  source="$4"
+  body="$5"
+
+  count="$(block_count "$name" "$target")"
+  if [ "$count" = "1" ] && [ "$FORCE" -eq 0 ]; then
+    return 0
+  fi
+
+  backup="$(backup_target "$target" copy)"
+  if [ "$count" != "0" ]; then
+    remove_block_from_file "$name" "$target"
+  fi
+
+  append_block_to_file "$name" "$target" "$body"
+  append_ledger "$kind" "$name" "block" "$target" "$source" "$backup"
+}
+
+active_shell_rc() {
+  case "$(basename "${SHELL:-}")" in
+    zsh) printf '%s\n' "$HOME/.zshrc" ;;
+    bash) printf '%s\n' "$HOME/.bashrc" ;;
+    *) printf '%s\n' "$HOME/.profile" ;;
+  esac
+}
+
+ensure_path_block() {
+  local target body
+
+  if contains_path_entry "$LOCAL_BIN"; then
+    return 0
+  fi
+
+  target="$(active_shell_rc)"
+  body='export PATH="$HOME/.local/bin:$PATH"'
+  ensure_managed_block "shell" "path" "$target" "$LOCAL_BIN" "$body"
+}
+
+install_dotfiles() {
+  local only found name mode rel_source rel_target abs_source target body
+  only="$1"
+  found=0
+
+  [ -f "$DOTFILES_MANIFEST" ] || die "missing manifest: $DOTFILES_MANIFEST"
+
+  while IFS='|' read -r name mode rel_source rel_target; do
+    if skip_manifest_row "$name"; then
+      continue
+    fi
+    if [ -n "$only" ] && [ "$only" != "$name" ]; then
+      continue
+    fi
+    found=1
+
+    abs_source="$KHZHAO_REPO/$rel_source"
+    target="$(expand_home "$rel_target")"
+    [ -e "$abs_source" ] || die "dotfile source not found: $abs_source"
+
+    case "$mode" in
+      symlink)
+        ensure_symlink "dotfile" "$name" "$target" "$abs_source"
+        ;;
+      block)
+        body="$(managed_source_line "$rel_source" "$abs_source")"
+        ensure_managed_block "dotfile" "$name" "$target" "$abs_source" "$body"
+        ;;
+      *)
+        die "unsupported dotfile mode '$mode' for $name"
+        ;;
+    esac
+  done < "$DOTFILES_MANIFEST"
+
+  if [ -n "$only" ] && [ "$found" -eq 0 ]; then
+    die "no dotfile named '$only' in $DOTFILES_MANIFEST"
+  fi
+}
+
+ensure_entrypoint() {
+  local repo_cli user_cli
+  repo_cli="$KHZHAO_REPO/khzhao"
+  user_cli="$LOCAL_BIN/khzhao"
+
+  [ -f "$repo_cli" ] || die "repo CLI not found: $repo_cli"
+  ensure_symlink "entrypoint" "khzhao" "$user_cli" "$repo_cli"
+}
+
+cmd_install() {
+  local only
+  DRY_RUN=0
+  FORCE=0
+  only=""
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run)
+        DRY_RUN=1
+        ;;
+      --force)
+        FORCE=1
+        ;;
+      --only)
+        shift
+        [ "$#" -gt 0 ] || die "--only requires a name"
+        only="$1"
+        ;;
+      *)
+        die "unknown install argument: $1"
+        ;;
+    esac
+    shift
+  done
+
+  ensure_dirs
+  install_dotfiles "$only"
+  ensure_entrypoint
+  ensure_path_block
+}
+
+cmd_update() {
+  local dry_run target
+  dry_run=0
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run)
+        dry_run=1
+        ;;
+      *)
+        die "unknown update argument: $1"
+        ;;
+    esac
+    shift
+  done
+
+  command -v git >/dev/null 2>&1 || die "git is required to update khzhao"
+  [ -d "$KHZHAO_REPO/.git" ] || die "khzhao repo is not a git checkout: $KHZHAO_REPO"
+
+  if [ "$dry_run" -eq 1 ]; then
+    target="$(repo_reset_target "$KHZHAO_REPO")"
+    echo "git -C $KHZHAO_REPO fetch --prune"
+    echo "git -C $KHZHAO_REPO reset --hard $target"
+    echo "$KHZHAO_REPO/khzhao install"
+    return 0
+  fi
+
+  git -C "$KHZHAO_REPO" fetch --prune
+  target="$(repo_reset_target "$KHZHAO_REPO")"
+  git -C "$KHZHAO_REPO" reset --hard "$target"
+  "$KHZHAO_REPO/khzhao" install
+}
+
+repo_reset_target() {
+  local repo upstream branch
+  repo="$1"
+
+  upstream="$(git -C "$repo" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
+  if [ -n "$upstream" ]; then
+    printf '%s\n' "$upstream"
+    return
+  fi
+
+  branch="$(git -C "$repo" branch --show-current 2>/dev/null || true)"
+  [ -n "$branch" ] || branch="main"
+  printf 'origin/%s\n' "$branch"
+}
+
+remove_symlink_if_managed() {
+  local target source
+  target="$1"
+  source="$2"
+
+  if same_symlink "$target" "$source"; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "rm $target"
+    else
+      rm "$target"
+    fi
+  elif [ -e "$target" ] || [ -L "$target" ]; then
+    warn "leaving unmanaged path in place: $target"
+  fi
+}
+
+remove_dotfiles() {
+  local name mode rel_source rel_target abs_source target count
+
+  [ -f "$DOTFILES_MANIFEST" ] || return 0
+
+  while IFS='|' read -r name mode rel_source rel_target; do
+    if skip_manifest_row "$name"; then
+      continue
+    fi
+
+    abs_source="$KHZHAO_REPO/$rel_source"
+    target="$(expand_home "$rel_target")"
+
+    case "$mode" in
+      symlink)
+        remove_symlink_if_managed "$target" "$abs_source"
+        ;;
+      block)
+        count="$(block_count "$name" "$target")"
+        if [ "$count" != "0" ]; then
+          remove_block_from_file "$name" "$target"
+        fi
+        ;;
+    esac
+  done < "$DOTFILES_MANIFEST"
+}
+
+restore_backups() {
+  local kind name mode target source backup timestamp restored_targets
+  restored_targets="|"
+
+  [ -f "$LEDGER" ] || return 0
+
+  while IFS='|' read -r kind name mode target source backup timestamp; do
+    [ -n "${backup:-}" ] || continue
+    [ -e "$backup" ] || [ -L "$backup" ] || continue
+    case "$restored_targets" in
+      *"|$target|"*) continue ;;
+    esac
+
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "restore $backup -> $target"
+      restored_targets="${restored_targets}${target}|"
+      continue
+    fi
+
+    mkdir -p "$(dirname "$target")"
+    rm -rf "$target"
+    cp -pR "$backup" "$target"
+    restored_targets="${restored_targets}${target}|"
+  done < "$LEDGER"
+}
+
+safe_remove_khzhao_home() {
+  case "$KHZHAO_HOME" in
+    ""|"/"|"$HOME"|"$HOME/")
+      die "refusing to remove unsafe KHZHAO_HOME: $KHZHAO_HOME"
+      ;;
+  esac
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "rm -rf $KHZHAO_HOME"
+  else
+    rm -rf "$KHZHAO_HOME"
+  fi
+}
+
+cmd_uninstall() {
+  local restore user_cli repo_cli path_target
+  DRY_RUN=0
+  restore=0
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --dry-run)
+        DRY_RUN=1
+        ;;
+      --restore-backups)
+        restore=1
+        ;;
+      *)
+        die "unknown uninstall argument: $1"
+        ;;
+    esac
+    shift
+  done
+
+  repo_cli="$KHZHAO_REPO/khzhao"
+  user_cli="$LOCAL_BIN/khzhao"
+
+  remove_dotfiles
+  path_target="$(active_shell_rc)"
+  if [ "$(block_count "path" "$path_target")" != "0" ]; then
+    remove_block_from_file "path" "$path_target"
+  fi
+  remove_symlink_if_managed "$user_cli" "$repo_cli"
+
+  if [ "$restore" -eq 1 ]; then
+    restore_backups
+  fi
+
+  safe_remove_khzhao_home
+}
+
+find_task() {
+  local wanted name runner rel_path entrypoint description
+  wanted="$1"
+
+  [ -f "$TASKS_MANIFEST" ] || die "missing manifest: $TASKS_MANIFEST"
+
+  while IFS='|' read -r name runner rel_path entrypoint description; do
+    if skip_manifest_row "$name"; then
+      continue
+    fi
+    if [ "$name" = "$wanted" ]; then
+      TASK_NAME="$name"
+      TASK_RUNNER="$runner"
+      TASK_PATH="$rel_path"
+      TASK_ENTRYPOINT="$entrypoint"
+      TASK_DESCRIPTION="$description"
+      return 0
+    fi
+  done < "$TASKS_MANIFEST"
+
+  return 1
+}
+
+require_runtime() {
+  local task command install_hint
+  task="$1"
+  command="$2"
+  install_hint="$3"
+
+  if ! command -v "$command" >/dev/null 2>&1; then
+    cat >&2 <<EOF
+Task \`$task\` requires $command, but $command was not found on PATH.
+Install $install_hint and rerun the task.
+EOF
+    return 1
+  fi
+}
+
+runner_runtime() {
+  case "$1" in
+    bash|bash-function|inline-bash) printf '%s\n' "bash" ;;
+    sh) printf '%s\n' "sh" ;;
+    uv-python) printf '%s\n' "uv" ;;
+    node) printf '%s\n' "node" ;;
+    exec) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+cmd_run() {
+  local task path runtime
+  [ "$#" -gt 0 ] || die "usage: khzhao run <task-name> [args...]"
+  task="$1"
+  shift
+
+  if ! find_task "$task"; then
+    die "unknown task: $task"
+  fi
+
+  path="$TASK_PATH"
+  if [ -n "$path" ]; then
+    path="$KHZHAO_REPO/$path"
+    [ -e "$path" ] || die "task file not found: $path"
+  fi
+
+  runtime="$(runner_runtime "$TASK_RUNNER")" || die "unsupported task runner: $TASK_RUNNER"
+  if [ -n "$runtime" ]; then
+    require_runtime "$TASK_NAME" "$runtime" "$runtime"
+  fi
+
+  case "$TASK_RUNNER" in
+    bash)
+      bash "$path" "$@"
+      ;;
+    bash-function)
+      [ -n "$TASK_ENTRYPOINT" ] || die "task $TASK_NAME is missing an entrypoint"
+      (
+        # shellcheck source=/dev/null
+        . "$path"
+        "$TASK_ENTRYPOINT" "$@"
+      )
+      ;;
+    sh)
+      sh "$path" "$@"
+      ;;
+    exec)
+      [ -x "$path" ] || die "task is not executable: $path"
+      "$path" "$@"
+      ;;
+    uv-python)
+      uv run "$path" "$@"
+      ;;
+    node)
+      node "$path" "$@"
+      ;;
+    inline-bash)
+      [ -n "$TASK_ENTRYPOINT" ] || die "task $TASK_NAME is missing inline bash"
+      bash -lc "$TASK_ENTRYPOINT" -- "$@"
+      ;;
+    *)
+      die "unsupported task runner: $TASK_RUNNER"
+      ;;
+  esac
+}
+
+cmd_list() {
+  local name mode rel_source rel_target runner rel_path entrypoint description
+
+  echo "Dotfiles:"
+  if [ -f "$DOTFILES_MANIFEST" ]; then
+    while IFS='|' read -r name mode rel_source rel_target; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      printf '  %s (%s) -> %s\n' "$name" "$mode" "$rel_target"
+    done < "$DOTFILES_MANIFEST"
+  fi
+
+  echo
+  echo "Tasks:"
+  if [ -f "$TASKS_MANIFEST" ]; then
+    while IFS='|' read -r name runner rel_path entrypoint description; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      printf '  %s [%s] - %s\n' "$name" "$runner" "$description"
+    done < "$TASKS_MANIFEST"
+  fi
+}
+
+doctor_ok() {
+  printf '[ok] %s\n' "$*"
+}
+
+doctor_fail() {
+  printf '[fail] %s\n' "$*"
+  DOCTOR_FAILURES=$((DOCTOR_FAILURES + 1))
+}
+
+cmd_doctor() {
+  local name mode rel_source rel_target abs_source target count runner rel_path entrypoint description path runtime
+  DOCTOR_FAILURES=0
+
+  [ -d "$KHZHAO_REPO" ] && doctor_ok "repo exists: $KHZHAO_REPO" || doctor_fail "repo missing: $KHZHAO_REPO"
+  [ -L "$LOCAL_BIN/khzhao" ] && doctor_ok "entrypoint exists: $LOCAL_BIN/khzhao" || doctor_fail "entrypoint missing: $LOCAL_BIN/khzhao"
+  [ -f "$LEDGER" ] && doctor_ok "ledger exists: $LEDGER" || doctor_fail "ledger missing: $LEDGER"
+
+  if [ -f "$DOTFILES_MANIFEST" ]; then
+    while IFS='|' read -r name mode rel_source rel_target; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      abs_source="$KHZHAO_REPO/$rel_source"
+      target="$(expand_home "$rel_target")"
+
+      case "$mode" in
+        symlink)
+          if same_symlink "$target" "$abs_source"; then
+            doctor_ok "dotfile symlink valid: $target"
+          else
+            doctor_fail "dotfile symlink missing or unmanaged: $target"
+          fi
+          ;;
+        block)
+          count="$(block_count "$name" "$target")"
+          if [ "$count" = "1" ]; then
+            doctor_ok "shell block present once: $target ($name)"
+          elif [ "$count" = "0" ]; then
+            doctor_fail "shell block missing: $target ($name)"
+          else
+            doctor_fail "shell block duplicated: $target ($name)"
+          fi
+          ;;
+      esac
+    done < "$DOTFILES_MANIFEST"
+  else
+    doctor_fail "dotfile manifest missing: $DOTFILES_MANIFEST"
+  fi
+
+  if [ -f "$TASKS_MANIFEST" ]; then
+    while IFS='|' read -r name runner rel_path entrypoint description; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+
+      path="$rel_path"
+      if [ -n "$path" ]; then
+        path="$KHZHAO_REPO/$path"
+        [ -e "$path" ] && doctor_ok "task file exists: $name" || doctor_fail "task file missing: $name ($path)"
+      fi
+
+      if runtime="$(runner_runtime "$runner")"; then
+        if [ -n "$runtime" ] && ! command -v "$runtime" >/dev/null 2>&1; then
+          doctor_fail "$runtime runtime missing for task: $name"
+        fi
+      else
+        doctor_fail "unsupported task runner for $name: $runner"
+      fi
+    done < "$TASKS_MANIFEST"
+  else
+    doctor_fail "task manifest missing: $TASKS_MANIFEST"
+  fi
+
+  if [ "$DOCTOR_FAILURES" -eq 0 ]; then
+    return 0
+  fi
+  return 1
+}
+
+cmd_info() {
+  local name mode rel_source rel_target target runner rel_path entrypoint description count
+  echo "KHZHAO_HOME=$KHZHAO_HOME"
+  echo "repo=$KHZHAO_REPO"
+  echo "entrypoint=$LOCAL_BIN/khzhao"
+  echo "ledger=$LEDGER"
+  echo
+  echo "Installed dotfiles:"
+
+  if [ -f "$DOTFILES_MANIFEST" ]; then
+    while IFS='|' read -r name mode rel_source rel_target; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      target="$(expand_home "$rel_target")"
+      case "$mode" in
+        symlink)
+          if [ -L "$target" ]; then
+            printf '  %s -> %s\n' "$name" "$target"
+          fi
+          ;;
+        block)
+          count="$(block_count "$name" "$target")"
+          if [ "$count" != "0" ]; then
+            printf '  %s -> %s\n' "$name" "$target"
+          fi
+          ;;
+      esac
+    done < "$DOTFILES_MANIFEST"
+  fi
+
+  echo
+  echo "Available tasks:"
+  if [ -f "$TASKS_MANIFEST" ]; then
+    while IFS='|' read -r name runner rel_path entrypoint description; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      printf '  %s [%s] - %s\n' "$name" "$runner" "$description"
+    done < "$TASKS_MANIFEST"
+  fi
+}
+
+cmd_help() {
+  cat <<'EOF'
+usage: khzhao <command> [args...]
+
+Commands:
+  install [--dry-run] [--force] [--only <name>]
+  update [--dry-run]
+  uninstall [--dry-run] [--restore-backups]
+  info
+  run <task-name> [args...]
+  list
+  doctor
+  help
+
+Examples:
+  khzhao update
+  khzhao run new-project python mypkg
+  khzhao run new-project cpp mylib
+EOF
+}
+
+command="${1:-help}"
+if [ "$#" -gt 0 ]; then
+  shift
+fi
+
+case "$command" in
+  install) cmd_install "$@" ;;
+  update) cmd_update "$@" ;;
+  uninstall) cmd_uninstall "$@" ;;
+  info) cmd_info "$@" ;;
+  run) cmd_run "$@" ;;
+  list) cmd_list "$@" ;;
+  doctor) cmd_doctor "$@" ;;
+  help|-h|--help) cmd_help ;;
+  *) die "unknown command: $command" ;;
+esac

@@ -5,7 +5,6 @@ set mouse=a
 set number
 set linebreak
 set textwidth=250
-set linebreak
 set visualbell
 
 set hlsearch
