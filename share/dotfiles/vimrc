@@ -8,6 +8,10 @@ set mouse=a
 
 let s:khzhao_vim_home = empty($KHZHAO_HOME) ? expand('~/.khzhao/vim') : $KHZHAO_HOME . '/vim'
 execute 'set runtimepath^=' . fnameescape(s:khzhao_vim_home)
+let s:khzhao_vim_after = fnamemodify(resolve(expand('<sfile>:p')), ':h:h') . '/vim/after'
+if isdirectory(s:khzhao_vim_after)
+  execute 'set runtimepath+=' . fnameescape(s:khzhao_vim_after)
+endif
 
 call plug#begin(s:khzhao_vim_home . '/plugged')
 Plug 'preservim/nerdtree'
@@ -21,6 +25,9 @@ let g:NERDTreeWinSize = 30
 let g:NERDTreeQuitOnOpen = 0
 let g:NERDTreeChDirMode = 0
 let g:khzhao_nerdtree_root = getcwd()
+let s:khzhao_next_tab_id = 1
+let s:khzhao_closing_tab_buffers = []
+let s:khzhao_tabclose_bang = 0
 
 function! s:IsGitEditorBuffer() abort
   let l:name = expand('%:t')
@@ -38,7 +45,86 @@ function! s:IsGitEditorBuffer() abort
 endfunction
 
 function! s:ListedFileBuffers() abort
-  return filter(range(1, bufnr('$')), 'buflisted(v:val) && getbufvar(v:val, "&buftype") ==# "" && getbufvar(v:val, "&filetype") !=# "nerdtree" && (!empty(bufname(v:val)) || getbufvar(v:val, "&modified"))')
+  return filter(<SID>ScopedUserBuffers(), '!empty(bufname(v:val)) || getbufvar(v:val, "&modified")')
+endfunction
+
+function! s:EnsureTabState() abort
+  if !exists('t:khzhao_tab_id')
+    let t:khzhao_tab_id = s:khzhao_next_tab_id
+    let s:khzhao_next_tab_id += 1
+  endif
+endfunction
+
+function! s:IsUserBuffer(bufnr) abort
+  return buflisted(a:bufnr)
+        \ && getbufvar(a:bufnr, '&buftype') ==# ''
+        \ && getbufvar(a:bufnr, '&filetype') !=# 'nerdtree'
+endfunction
+
+function! s:RememberBufferOwner(bufnr) abort
+  if !<SID>IsUserBuffer(a:bufnr)
+    return
+  endif
+
+  call <SID>EnsureTabState()
+  if getbufvar(a:bufnr, 'khzhao_owner_tab_id', 0) == 0
+    call setbufvar(a:bufnr, 'khzhao_owner_tab_id', t:khzhao_tab_id)
+  endif
+endfunction
+
+function! s:RememberCurrentTabBuffers() abort
+  call <SID>EnsureTabState()
+  for l:buf in tabpagebuflist()
+    call <SID>RememberBufferOwner(l:buf)
+  endfor
+endfunction
+
+function! s:ScopedUserBuffers() abort
+  call <SID>RememberCurrentTabBuffers()
+  let l:buffers = []
+  let l:tab_id = t:khzhao_tab_id
+
+  for l:buf in range(1, bufnr('$'))
+    if <SID>IsUserBuffer(l:buf) && getbufvar(l:buf, 'khzhao_owner_tab_id', 0) == l:tab_id
+      call add(l:buffers, l:buf)
+    endif
+  endfor
+
+  return l:buffers
+endfunction
+
+function! KhzhaoScopedUserBuffers() abort
+  return <SID>ScopedUserBuffers()
+endfunction
+
+function! s:CaptureClosingTabBuffers() abort
+  call <SID>RememberCurrentTabBuffers()
+  let s:khzhao_closing_tab_buffers = []
+
+  for l:buf in range(1, bufnr('$'))
+    if <SID>IsUserBuffer(l:buf) && getbufvar(l:buf, 'khzhao_owner_tab_id', 0) == t:khzhao_tab_id
+      call add(s:khzhao_closing_tab_buffers, l:buf)
+    endif
+  endfor
+endfunction
+
+function! s:DeleteClosedTabBuffers() abort
+  let l:visible_buffers = []
+  for l:tab in range(1, tabpagenr('$'))
+    call extend(l:visible_buffers, tabpagebuflist(l:tab))
+  endfor
+
+  for l:buf in s:khzhao_closing_tab_buffers
+    if buflisted(l:buf) && index(l:visible_buffers, l:buf) < 0
+      silent! execute 'bdelete' . (s:khzhao_tabclose_bang ? '!' : '') . ' ' . l:buf
+    endif
+  endfor
+
+  let s:khzhao_closing_tab_buffers = []
+  let s:khzhao_tabclose_bang = 0
+  if exists('*buftabline#update')
+    call buftabline#update(0)
+  endif
 endfunction
 
 function! s:OpenNERDTree() abort
@@ -58,6 +144,37 @@ function! s:FocusNERDTree() abort
   endif
 endfunction
 
+function! s:SwitchToBuffer(bufnr) abort
+  let l:return_win = 0
+  if &filetype ==# 'nerdtree'
+    let l:return_win = win_getid()
+    wincmd l
+    if &filetype ==# 'nerdtree'
+      return
+    endif
+  endif
+
+  execute 'buffer' a:bufnr
+  if l:return_win
+    call win_gotoid(l:return_win)
+  endif
+endfunction
+
+function! s:ScopedNeighbor(bufnr, direction) abort
+  let l:buffers = <SID>ScopedUserBuffers()
+  if len(l:buffers) < 2
+    return 0
+  endif
+
+  let l:idx = index(l:buffers, a:bufnr)
+  if l:idx < 0
+    return l:buffers[0]
+  endif
+
+  let l:step = a:direction ==# 'previous' ? -1 : 1
+  return l:buffers[(l:idx + l:step + len(l:buffers)) % len(l:buffers)]
+endfunction
+
 function! s:DeleteFileBuffer(...) abort
   let l:bang = get(a:000, 0, 0)
   let l:return_win = 0
@@ -70,6 +187,7 @@ function! s:DeleteFileBuffer(...) abort
   endif
 
   let l:delete_buf = bufnr('%')
+  let l:target_buf = <SID>ScopedNeighbor(l:delete_buf, 'previous')
   if &modified && !l:bang
     echohl WarningMsg
     echo 'Buffer has unsaved changes; write or discard before deleting'
@@ -80,9 +198,11 @@ function! s:DeleteFileBuffer(...) abort
     return
   endif
 
-  silent! bprevious
-  if bufnr('%') == l:delete_buf
+  if l:target_buf
+    call <SID>SwitchToBuffer(l:target_buf)
+  else
     enew
+    call <SID>RememberBufferOwner(bufnr('%'))
   endif
   execute 'bdelete' . (l:bang ? '!' : '') . ' ' . l:delete_buf
 
@@ -91,9 +211,18 @@ function! s:DeleteFileBuffer(...) abort
   endif
 endfunction
 
+function! s:CloseCurrentTab(bang) abort
+  let s:khzhao_tabclose_bang = a:bang
+  try
+    execute 'tabclose' . (a:bang ? '!' : '')
+  finally
+    let s:khzhao_tabclose_bang = 0
+  endtry
+endfunction
+
 function! s:SmartQuit(bang) abort
   if tabpagenr('$') > 1
-    execute 'tabclose' . (a:bang ? '!' : '')
+    call <SID>CloseCurrentTab(a:bang)
     return
   endif
 
@@ -118,21 +247,45 @@ function! s:SmartWriteQuit(bang) abort
   call <SID>SmartQuit(a:bang)
 endfunction
 
-function! s:CycleFileBufferFromNERDTree(direction) abort
-  let l:tree_win = win_getid()
-  wincmd l
+function! s:CycleScopedFileBuffer(direction) abort
+  let l:current_win = win_getid()
+  if &filetype ==# 'nerdtree'
+    wincmd l
+    if win_getid() == l:current_win
+      return
+    endif
+  endif
 
-  if win_getid() == l:tree_win
+  let l:target = <SID>ScopedNeighbor(bufnr('%'), a:direction)
+  if l:target
+    call <SID>SwitchToBuffer(l:target)
+  endif
+
+  if win_id2win(l:current_win)
+    call win_gotoid(l:current_win)
+  endif
+endfunction
+
+function! s:PromptBufferSwitch() abort
+  let l:buffers = <SID>ScopedUserBuffers()
+  if empty(l:buffers)
+    echo 'No buffers in this tab'
     return
   endif
 
-  if a:direction ==# 'previous'
-    bprevious
-  else
-    bnext
+  echo 'Buffers in this tab:'
+  for l:buf in l:buffers
+    let l:name = empty(bufname(l:buf)) ? '[No Name]' : fnamemodify(bufname(l:buf), ':~:.')
+    echo printf('%3d %s', l:buf, l:name)
+  endfor
+
+  let l:buf = str2nr(input('Buffer: '))
+  redraw
+  if index(l:buffers, l:buf) < 0
+    return
   endif
 
-  call win_gotoid(l:tree_win)
+  call <SID>SwitchToBuffer(l:buf)
 endfunction
 
 function! s:SmartQuitCommandEnter() abort
@@ -226,14 +379,22 @@ function! s:NERDTreeKeymaps() abort
   nnoremap <buffer> <C-k> 5k
   nnoremap <buffer> <C-h> 5h
   nnoremap <buffer> <C-l> 5l
-  nnoremap <buffer> H :call <SID>CycleFileBufferFromNERDTree('previous')<CR>
-  nnoremap <buffer> L :call <SID>CycleFileBufferFromNERDTree('next')<CR>
+  nnoremap <buffer> H :call <SID>CycleScopedFileBuffer('previous')<CR>
+  nnoremap <buffer> L :call <SID>CycleScopedFileBuffer('next')<CR>
   nnoremap <buffer> <silent> q :KhzhaoSmartQuit<CR>
 endfunction
 
 command! -bang KhzhaoSmartQuit call <SID>SmartQuit(<bang>0)
 command! -bang KhzhaoSmartWriteQuit call <SID>SmartWriteQuit(<bang>0)
+command! KhzhaoBuffers call <SID>PromptBufferSwitch()
 cnoremap <expr> <CR> <SID>SmartQuitCommandEnter()
+
+augroup khzhao_buffers
+  autocmd!
+  autocmd BufAdd * call <SID>RememberBufferOwner(str2nr(expand('<abuf>')))
+  autocmd TabClosedPre * call <SID>CaptureClosingTabBuffers()
+  autocmd TabClosed * call <SID>DeleteClosedTabBuffers()
+augroup END
 
 augroup khzhao_nerdtree
   autocmd!
@@ -244,7 +405,7 @@ augroup khzhao_nerdtree
 augroup END
 
 nnoremap <leader>n :call <SID>FocusNERDTree()<CR>
-nnoremap <leader>b :buffers<CR>
+nnoremap <leader>b :KhzhaoBuffers<CR>
 nnoremap <leader>x :call <SID>DeleteFileBuffer()<CR>
 
 set number
@@ -278,8 +439,8 @@ set expandtab
 set pastetoggle=<C-p>
 
 nnoremap <C-t> :tabnew<CR>
-nnoremap H :bprevious<CR>
-nnoremap L :bnext<CR>
+nnoremap H :call <SID>CycleScopedFileBuffer('previous')<CR>
+nnoremap L :call <SID>CycleScopedFileBuffer('next')<CR>
 vnoremap <C-r> "hy:%s/<C-r>h//gc<left><left><left>
 
 function FormatBuffer()
