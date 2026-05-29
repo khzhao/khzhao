@@ -1,3 +1,7 @@
+if !has('gui_running') && str2nr(&t_Co) < 256
+  set t_Co=256
+endif
+
 syntax on
 
 set mouse=a
@@ -8,6 +12,7 @@ execute 'set runtimepath^=' . fnameescape(s:khzhao_vim_home)
 call plug#begin(s:khzhao_vim_home . '/plugged')
 Plug 'preservim/nerdtree'
 Plug 'ap/vim-buftabline'
+Plug 'morhetz/gruvbox'
 call plug#end()
 
 " NERDTree file explorer.
@@ -286,4 +291,10 @@ function FormatBuffer()
 endfunction
 
 autocmd BufWritePre *.h,*.hpp,*.c,*.cpp,*.vert,*.frag :call FormatBuffer()
-colorscheme desert
+let g:gruvbox_termcolors = 256
+set background=dark
+try
+  colorscheme gruvbox
+catch /^Vim\%((\a\+)\)\=:E185/
+  colorscheme desert
+endtry

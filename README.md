@@ -52,7 +52,7 @@ Vim plugins are khzhao-owned and installed under:
   plugged/
 ```
 
-The managed Vim config uses vim-plug to install NERDTree and vim-buftabline. `khzhao install` bootstraps vim-plug and runs `PlugInstall` when installing the Vim config.
+The managed Vim config uses vim-plug to install NERDTree, vim-buftabline, and Gruvbox. `khzhao install` bootstraps vim-plug and runs `PlugInstall` when installing the Vim config.
 
 ## Commands
 
