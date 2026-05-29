@@ -1,2 +1,2 @@
-name|runner|path|entrypoint|description
-new-project|uv-python|share/tasks/python/new-project.py||Create Python or C++ project from templates
+name|path|description
+new-project|share/tasks/python/new-project.py|Create Python or C++ project from templates

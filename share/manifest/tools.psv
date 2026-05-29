@@ -1,0 +1,7 @@
+name|mode|path|description
+git|check|install/tools/git/lifecycle.sh|Git
+curl|check|install/tools/curl/lifecycle.sh|Download tool
+neovim|install|install/tools/neovim/lifecycle.sh|Neovim editor
+uv|install|install/tools/uv/lifecycle.sh|Python script runner
+node|install|install/tools/node/lifecycle.sh|Node runtime and npm
+legacy-vim|always|install/tools/legacy-vim/lifecycle.sh|Cleanup legacy khzhao Vim plugin artifacts

@@ -73,28 +73,25 @@ fi
 
 STATE_DIR="$KHZHAO_HOME/state"
 BACKUP_DIR="$KHZHAO_HOME/backups"
-LOG_DIR="$KHZHAO_HOME/logs"
 TMP_DIR="$KHZHAO_HOME/tmp"
 LOCAL_BIN="$HOME/.local/bin"
 DOTFILES_MANIFEST="$KHZHAO_REPO/share/manifest/dotfiles.psv"
+CONFIGS_MANIFEST="$KHZHAO_REPO/share/manifest/configs.psv"
 TASKS_MANIFEST="$KHZHAO_REPO/share/manifest/tasks.psv"
+TOOLS_MANIFEST="$KHZHAO_REPO/share/manifest/tools.psv"
 LEDGER="$STATE_DIR/ledger.psv"
-KHZHAO_VIM_HOME="$KHZHAO_HOME/vim"
-VIM_PLUG_URL="https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim"
-VIM_PLUG_PATH="$KHZHAO_VIM_HOME/autoload/plug.vim"
-VIM_PLUGIN_DIR="$KHZHAO_VIM_HOME/plugged"
-VIM_PLUGINS="nerdtree vim-buftabline gruvbox"
+DRY_RUN=0
+FORCE=0
 
 ensure_dirs() {
   if [ "$DRY_RUN" -eq 1 ]; then
-    echo "mkdir -p $KHZHAO_HOME/{state,backups,logs,tmp} $LOCAL_BIN"
+    echo "mkdir -p $KHZHAO_HOME/{state,backups,tmp} $LOCAL_BIN"
     return
   fi
 
   mkdir -p \
     "$STATE_DIR" \
     "$BACKUP_DIR" \
-    "$LOG_DIR" \
     "$TMP_DIR" \
     "$LOCAL_BIN"
 }
@@ -306,6 +303,180 @@ ensure_path_block() {
   ensure_managed_block "shell" "path" "$target" "$LOCAL_BIN" "$body"
 }
 
+run_tool_lifecycle() {
+  local rel_path action
+  rel_path="$1"
+  action="$2"
+
+  KHZHAO_HOME="$KHZHAO_HOME" \
+  KHZHAO_REPO="$KHZHAO_REPO" \
+  KHZHAO_LOCAL_BIN="$LOCAL_BIN" \
+  KHZHAO_BACKUP_DIR="$BACKUP_DIR" \
+  KHZHAO_TMP_DIR="$TMP_DIR" \
+  DRY_RUN="$DRY_RUN" \
+    bash "$KHZHAO_REPO/$rel_path" "$action"
+}
+
+run_config_lifecycle() {
+  local rel_path action
+  rel_path="$1"
+  action="$2"
+
+  KHZHAO_HOME="$KHZHAO_HOME" \
+  KHZHAO_REPO="$KHZHAO_REPO" \
+  KHZHAO_LOCAL_BIN="$LOCAL_BIN" \
+  KHZHAO_BACKUP_DIR="$BACKUP_DIR" \
+  KHZHAO_TMP_DIR="$TMP_DIR" \
+  DRY_RUN="$DRY_RUN" \
+    bash "$KHZHAO_REPO/$rel_path" "$action"
+}
+
+tool_available() {
+  local rel_path
+  rel_path="$1"
+  run_tool_lifecycle "$rel_path" check >/dev/null 2>&1
+}
+
+config_available() {
+  local rel_path
+  rel_path="$1"
+  run_config_lifecycle "$rel_path" check >/dev/null 2>&1
+}
+
+install_tools() {
+  local only name mode rel_path description found
+  only="$1"
+  found=0
+
+  [ -f "$TOOLS_MANIFEST" ] || die "missing manifest: $TOOLS_MANIFEST"
+
+  while IFS='|' read -r name mode rel_path description; do
+    if skip_manifest_row "$name"; then
+      continue
+    fi
+    case "$mode" in
+      check|install|always) ;;
+      *) die "unsupported tool mode '$mode' for $name" ;;
+    esac
+    if [ -n "$only" ] && [ "$only" != "$name" ]; then
+      continue
+    fi
+    found=1
+
+    case "$mode" in
+      always)
+        run_tool_lifecycle "$rel_path" install || return $?
+        continue
+        ;;
+      check)
+        if ! tool_available "$rel_path"; then
+          run_tool_lifecycle "$rel_path" install || return $?
+        fi
+        continue
+        ;;
+    esac
+
+    if tool_available "$rel_path"; then
+      continue
+    fi
+
+    if [ "$mode" = "install" ]; then
+      run_tool_lifecycle "$rel_path" install || return $?
+      [ "$DRY_RUN" -eq 1 ] && continue
+      if ! tool_available "$rel_path"; then
+        die "tool '$name' was not found after install"
+      fi
+    else
+      die "unsupported tool mode '$mode' for $name"
+    fi
+  done < "$TOOLS_MANIFEST"
+
+  if [ -n "$only" ] && [ "$found" -eq 0 ]; then
+    return 2
+  fi
+}
+
+install_configs() {
+  local only name mode rel_path description found
+  only="$1"
+  found=0
+
+  [ -f "$CONFIGS_MANIFEST" ] || return 2
+
+  while IFS='|' read -r name mode rel_path description; do
+    if skip_manifest_row "$name"; then
+      continue
+    fi
+    case "$mode" in
+      check|install|always) ;;
+      *) die "unsupported config mode '$mode' for $name" ;;
+    esac
+    if [ -n "$only" ] && [ "$only" != "$name" ]; then
+      continue
+    fi
+    found=1
+
+    case "$mode" in
+      always)
+        run_config_lifecycle "$rel_path" install || return $?
+        continue
+        ;;
+      check)
+        if ! config_available "$rel_path"; then
+          run_config_lifecycle "$rel_path" install || return $?
+        fi
+        continue
+        ;;
+    esac
+
+    if config_available "$rel_path"; then
+      continue
+    fi
+
+    if [ "$mode" = "install" ]; then
+      run_config_lifecycle "$rel_path" install || return $?
+      [ "$DRY_RUN" -eq 1 ] && continue
+      if ! config_available "$rel_path"; then
+        die "config '$name' was not found after install"
+      fi
+    else
+      die "unsupported config mode '$mode' for $name"
+    fi
+  done < "$CONFIGS_MANIFEST"
+
+  if [ -n "$only" ] && [ "$found" -eq 0 ]; then
+    return 2
+  fi
+}
+
+uninstall_configs() {
+  local name mode rel_path description
+
+  [ -f "$CONFIGS_MANIFEST" ] || return 0
+
+  while IFS='|' read -r name mode rel_path description; do
+    if skip_manifest_row "$name"; then
+      continue
+    fi
+    [ "$mode" = "check" ] && continue
+    run_config_lifecycle "$rel_path" uninstall || return $?
+  done < "$CONFIGS_MANIFEST"
+}
+
+uninstall_tool_state() {
+  local name mode rel_path description
+
+  [ -f "$TOOLS_MANIFEST" ] || return 0
+
+  while IFS='|' read -r name mode rel_path description; do
+    if skip_manifest_row "$name"; then
+      continue
+    fi
+    [ "$mode" = "always" ] || continue
+    run_tool_lifecycle "$rel_path" uninstall || true
+  done < "$TOOLS_MANIFEST"
+}
+
 install_dotfiles() {
   local only found name mode rel_source rel_target abs_source target body
   only="$1"
@@ -340,9 +511,7 @@ install_dotfiles() {
     esac
   done < "$DOTFILES_MANIFEST"
 
-  if [ -n "$only" ] && [ "$found" -eq 0 ]; then
-    die "no dotfile named '$only' in $DOTFILES_MANIFEST"
-  fi
+  [ -z "$only" ] || [ "$found" -ne 0 ]
 }
 
 ensure_entrypoint() {
@@ -354,53 +523,12 @@ ensure_entrypoint() {
   ensure_symlink "entrypoint" "khzhao" "$user_cli" "$repo_cli"
 }
 
-ensure_vim_plug() {
-  if [ -f "$VIM_PLUG_PATH" ]; then
-    return 0
-  fi
-
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "curl -fLo $VIM_PLUG_PATH --create-dirs $VIM_PLUG_URL"
-    return 0
-  fi
-
-  command -v curl >/dev/null 2>&1 || die "curl is required to install vim-plug"
-  mkdir -p "$(dirname "$VIM_PLUG_PATH")"
-  curl -fLo "$VIM_PLUG_PATH" --create-dirs "$VIM_PLUG_URL"
-}
-
-vim_plugins_missing() {
-  local plugin
-
-  for plugin in $VIM_PLUGINS; do
-    if [ ! -d "$VIM_PLUGIN_DIR/$plugin" ]; then
-      return 0
-    fi
-  done
-
-  return 1
-}
-
-install_vim_plugins() {
-  ensure_vim_plug
-
-  if ! vim_plugins_missing; then
-    return 0
-  fi
-
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "KHZHAO_HOME=$KHZHAO_HOME vim -Nu $KHZHAO_REPO/share/dotfiles/vimrc -n -es +'PlugInstall --sync' +'qall!'"
-    return 0
-  fi
-
-  KHZHAO_HOME="$KHZHAO_HOME" vim -Nu "$KHZHAO_REPO/share/dotfiles/vimrc" -n -es +'PlugInstall --sync' +'qall!'
-}
-
 cmd_install() {
-  local only
+  local only found status skip_tools
   DRY_RUN=0
   FORCE=0
   only=""
+  skip_tools=0
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -408,7 +536,11 @@ cmd_install() {
         DRY_RUN=1
         ;;
       --force)
+        # Accepted for compatibility with older installers. Also refreshes managed shell blocks.
         FORCE=1
+        ;;
+      --skip-tools)
+        skip_tools=1
         ;;
       --only)
         shift
@@ -423,10 +555,29 @@ cmd_install() {
   done
 
   ensure_dirs
-  install_dotfiles "$only"
-  if [ -z "$only" ] || [ "$only" = "vimrc" ]; then
-    install_vim_plugins
+  found=0
+
+  if [ "$skip_tools" -eq 0 ]; then
+    install_tools "$only" && found=1 || {
+      status="$?"
+      [ "$status" -eq 2 ] || exit "$status"
+    }
   fi
+
+  install_configs "$only" && found=1 || {
+    status="$?"
+    [ "$status" -eq 2 ] || exit "$status"
+  }
+
+  install_dotfiles "$only" && found=1 || {
+    status="$?"
+    [ "$status" -eq 1 ] || exit "$status"
+  }
+
+  if [ -n "$only" ] && [ "$found" -eq 0 ]; then
+    die "no tool, config, or dotfile named '$only'"
+  fi
+
   ensure_entrypoint
   ensure_path_block
 }
@@ -523,12 +674,18 @@ remove_dotfiles() {
 }
 
 restore_backups() {
-  local kind name mode target source backup timestamp restored_targets
+  local scope kind name mode target source backup timestamp restored_targets
+  scope="$1"
   restored_targets="|"
 
   [ -f "$LEDGER" ] || return 0
 
   while IFS='|' read -r kind name mode target source backup timestamp; do
+    case "$scope:$mode" in
+      all:*) ;;
+      symlink:symlink) ;;
+      *) continue ;;
+    esac
     [ -n "${backup:-}" ] || continue
     [ -e "$backup" ] || [ -L "$backup" ] || continue
     case "$restored_targets" in
@@ -562,37 +719,10 @@ safe_remove_khzhao_home() {
   fi
 }
 
-remove_file_if_exists() {
-  local path
-  path="$1"
-
-  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
-    return 0
-  fi
-
-  if [ "$DRY_RUN" -eq 1 ]; then
-    echo "rm -f $path"
-  else
-    rm -f "$path"
-  fi
-}
-
-remove_vim_artifacts() {
-  if [ -d "$KHZHAO_VIM_HOME" ] || [ -L "$KHZHAO_VIM_HOME" ]; then
-    if [ "$DRY_RUN" -eq 1 ]; then
-      echo "rm -rf $KHZHAO_VIM_HOME"
-    else
-      rm -rf "$KHZHAO_VIM_HOME"
-    fi
-  fi
-
-  remove_file_if_exists "$HOME/.NERDTreeBookmarks"
-}
-
 cmd_uninstall() {
-  local restore user_cli repo_cli path_target
+  local restore_scope user_cli repo_cli path_target
   DRY_RUN=0
-  restore=0
+  restore_scope="symlink"
 
   while [ "$#" -gt 0 ]; do
     case "$1" in
@@ -600,7 +730,7 @@ cmd_uninstall() {
         DRY_RUN=1
         ;;
       --restore-backups)
-        restore=1
+        restore_scope="all"
         ;;
       *)
         die "unknown uninstall argument: $1"
@@ -617,31 +747,28 @@ cmd_uninstall() {
   if [ "$(block_count "path" "$path_target")" != "0" ]; then
     remove_block_from_file "path" "$path_target"
   fi
-  remove_vim_artifacts
+  uninstall_configs
+  uninstall_tool_state
   remove_symlink_if_managed "$user_cli" "$repo_cli"
 
-  if [ "$restore" -eq 1 ]; then
-    restore_backups
-  fi
+  restore_backups "$restore_scope"
 
   safe_remove_khzhao_home
 }
 
 find_task() {
-  local wanted name runner rel_path entrypoint description
+  local wanted name rel_path description
   wanted="$1"
 
   [ -f "$TASKS_MANIFEST" ] || die "missing manifest: $TASKS_MANIFEST"
 
-  while IFS='|' read -r name runner rel_path entrypoint description; do
+  while IFS='|' read -r name rel_path description; do
     if skip_manifest_row "$name"; then
       continue
     fi
     if [ "$name" = "$wanted" ]; then
       TASK_NAME="$name"
-      TASK_RUNNER="$runner"
       TASK_PATH="$rel_path"
-      TASK_ENTRYPOINT="$entrypoint"
       TASK_DESCRIPTION="$description"
       return 0
     fi
@@ -650,34 +777,8 @@ find_task() {
   return 1
 }
 
-require_runtime() {
-  local task command install_hint
-  task="$1"
-  command="$2"
-  install_hint="$3"
-
-  if ! command -v "$command" >/dev/null 2>&1; then
-    cat >&2 <<EOF
-Task \`$task\` requires $command, but $command was not found on PATH.
-Install $install_hint and rerun the task.
-EOF
-    return 1
-  fi
-}
-
-runner_runtime() {
-  case "$1" in
-    bash|bash-function|inline-bash) printf '%s\n' "bash" ;;
-    sh) printf '%s\n' "sh" ;;
-    uv-python) printf '%s\n' "uv" ;;
-    node) printf '%s\n' "node" ;;
-    exec) return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 cmd_run() {
-  local task path runtime
+  local task path
   [ "$#" -gt 0 ] || die "usage: khzhao run <task-name> [args...]"
   task="$1"
   shift
@@ -687,54 +788,38 @@ cmd_run() {
   fi
 
   path="$TASK_PATH"
-  if [ -n "$path" ]; then
-    path="$KHZHAO_REPO/$path"
-    [ -e "$path" ] || die "task file not found: $path"
-  fi
+  path="$KHZHAO_REPO/$path"
+  [ -e "$path" ] || die "task file not found: $path"
+  command -v uv >/dev/null 2>&1 || die "task '$TASK_NAME' requires uv"
 
-  runtime="$(runner_runtime "$TASK_RUNNER")" || die "unsupported task runner: $TASK_RUNNER"
-  if [ -n "$runtime" ]; then
-    require_runtime "$TASK_NAME" "$runtime" "$runtime"
-  fi
-
-  case "$TASK_RUNNER" in
-    bash)
-      bash "$path" "$@"
-      ;;
-    bash-function)
-      [ -n "$TASK_ENTRYPOINT" ] || die "task $TASK_NAME is missing an entrypoint"
-      (
-        # shellcheck source=/dev/null
-        . "$path"
-        "$TASK_ENTRYPOINT" "$@"
-      )
-      ;;
-    sh)
-      sh "$path" "$@"
-      ;;
-    exec)
-      [ -x "$path" ] || die "task is not executable: $path"
-      "$path" "$@"
-      ;;
-    uv-python)
-      uv run "$path" "$@"
-      ;;
-    node)
-      node "$path" "$@"
-      ;;
-    inline-bash)
-      [ -n "$TASK_ENTRYPOINT" ] || die "task $TASK_NAME is missing inline bash"
-      bash -lc "$TASK_ENTRYPOINT" -- "$@"
-      ;;
-    *)
-      die "unsupported task runner: $TASK_RUNNER"
-      ;;
-  esac
+  uv run "$path" "$@"
 }
 
 cmd_list() {
-  local name mode rel_source rel_target runner rel_path entrypoint description
+  local name mode rel_source rel_target rel_path description
 
+  echo "Tools:"
+  if [ -f "$TOOLS_MANIFEST" ]; then
+    while IFS='|' read -r name mode rel_path description; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      printf '  %s [%s] - %s\n' "$name" "$mode" "$description"
+    done < "$TOOLS_MANIFEST"
+  fi
+
+  echo
+  echo "Configs:"
+  if [ -f "$CONFIGS_MANIFEST" ]; then
+    while IFS='|' read -r name mode rel_path description; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      printf '  %s [%s] - %s\n' "$name" "$mode" "$description"
+    done < "$CONFIGS_MANIFEST"
+  fi
+
+  echo
   echo "Dotfiles:"
   if [ -f "$DOTFILES_MANIFEST" ]; then
     while IFS='|' read -r name mode rel_source rel_target; do
@@ -748,11 +833,11 @@ cmd_list() {
   echo
   echo "Tasks:"
   if [ -f "$TASKS_MANIFEST" ]; then
-    while IFS='|' read -r name runner rel_path entrypoint description; do
+    while IFS='|' read -r name rel_path description; do
       if skip_manifest_row "$name"; then
         continue
       fi
-      printf '  %s [%s] - %s\n' "$name" "$runner" "$description"
+      printf '  %s - %s\n' "$name" "$description"
     done < "$TASKS_MANIFEST"
   fi
 }
@@ -767,12 +852,34 @@ doctor_fail() {
 }
 
 cmd_doctor() {
-  local name mode rel_source rel_target abs_source target count runner rel_path entrypoint description path runtime
+  local name mode rel_source rel_target abs_source target count rel_path description path
   DOCTOR_FAILURES=0
 
   [ -d "$KHZHAO_REPO" ] && doctor_ok "repo exists: $KHZHAO_REPO" || doctor_fail "repo missing: $KHZHAO_REPO"
   [ -L "$LOCAL_BIN/khzhao" ] && doctor_ok "entrypoint exists: $LOCAL_BIN/khzhao" || doctor_fail "entrypoint missing: $LOCAL_BIN/khzhao"
-  [ -f "$LEDGER" ] && doctor_ok "ledger exists: $LEDGER" || doctor_fail "ledger missing: $LEDGER"
+  [ -f "$LEDGER" ] && doctor_ok "ledger exists: $LEDGER" || doctor_ok "ledger not needed yet"
+
+  if [ -f "$TOOLS_MANIFEST" ]; then
+    while IFS='|' read -r name mode rel_path description; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      run_tool_lifecycle "$rel_path" doctor || DOCTOR_FAILURES=$((DOCTOR_FAILURES + 1))
+    done < "$TOOLS_MANIFEST"
+  else
+    doctor_fail "tool manifest missing: $TOOLS_MANIFEST"
+  fi
+
+  if [ -f "$CONFIGS_MANIFEST" ]; then
+    while IFS='|' read -r name mode rel_path description; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      run_config_lifecycle "$rel_path" doctor || DOCTOR_FAILURES=$((DOCTOR_FAILURES + 1))
+    done < "$CONFIGS_MANIFEST"
+  else
+    doctor_fail "config manifest missing: $CONFIGS_MANIFEST"
+  fi
 
   if [ -f "$DOTFILES_MANIFEST" ]; then
     while IFS='|' read -r name mode rel_source rel_target; do
@@ -807,24 +914,19 @@ cmd_doctor() {
   fi
 
   if [ -f "$TASKS_MANIFEST" ]; then
-    while IFS='|' read -r name runner rel_path entrypoint description; do
+    if command -v uv >/dev/null 2>&1; then
+      doctor_ok "uv runtime available for tasks"
+    else
+      doctor_fail "uv runtime missing for tasks"
+    fi
+
+    while IFS='|' read -r name rel_path description; do
       if skip_manifest_row "$name"; then
         continue
       fi
 
-      path="$rel_path"
-      if [ -n "$path" ]; then
-        path="$KHZHAO_REPO/$path"
-        [ -e "$path" ] && doctor_ok "task file exists: $name" || doctor_fail "task file missing: $name ($path)"
-      fi
-
-      if runtime="$(runner_runtime "$runner")"; then
-        if [ -n "$runtime" ] && ! command -v "$runtime" >/dev/null 2>&1; then
-          doctor_fail "$runtime runtime missing for task: $name"
-        fi
-      else
-        doctor_fail "unsupported task runner for $name: $runner"
-      fi
+      path="$KHZHAO_REPO/$rel_path"
+      [ -e "$path" ] && doctor_ok "task file exists: $name" || doctor_fail "task file missing: $name ($path)"
     done < "$TASKS_MANIFEST"
   else
     doctor_fail "task manifest missing: $TASKS_MANIFEST"
@@ -837,11 +939,33 @@ cmd_doctor() {
 }
 
 cmd_info() {
-  local name mode rel_source rel_target target runner rel_path entrypoint description count
+  local name mode rel_source rel_target target rel_path description count
   echo "KHZHAO_HOME=$KHZHAO_HOME"
   echo "repo=$KHZHAO_REPO"
   echo "entrypoint=$LOCAL_BIN/khzhao"
   echo "ledger=$LEDGER"
+  echo
+  echo "Managed tools:"
+  if [ -f "$TOOLS_MANIFEST" ]; then
+    while IFS='|' read -r name mode rel_path description; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      printf '  %s [%s]\n' "$name" "$mode"
+    done < "$TOOLS_MANIFEST"
+  fi
+
+  echo
+  echo "Managed configs:"
+  if [ -f "$CONFIGS_MANIFEST" ]; then
+    while IFS='|' read -r name mode rel_path description; do
+      if skip_manifest_row "$name"; then
+        continue
+      fi
+      printf '  %s [%s]\n' "$name" "$mode"
+    done < "$CONFIGS_MANIFEST"
+  fi
+
   echo
   echo "Installed dotfiles:"
 
@@ -870,11 +994,11 @@ cmd_info() {
   echo
   echo "Available tasks:"
   if [ -f "$TASKS_MANIFEST" ]; then
-    while IFS='|' read -r name runner rel_path entrypoint description; do
+    while IFS='|' read -r name rel_path description; do
       if skip_manifest_row "$name"; then
         continue
       fi
-      printf '  %s [%s] - %s\n' "$name" "$runner" "$description"
+      printf '  %s - %s\n' "$name" "$description"
     done < "$TASKS_MANIFEST"
   fi
 }
@@ -884,7 +1008,7 @@ cmd_help() {
 usage: khzhao <command> [args...]
 
 Commands:
-  install [--dry-run] [--force] [--only <name>]
+  install [--dry-run] [--skip-tools] [--only <name>]
   update [--dry-run]
   uninstall [--dry-run] [--restore-backups]
   info

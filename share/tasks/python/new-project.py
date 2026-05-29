@@ -45,7 +45,6 @@ class Component:
     name: str
     allowed_bases: tuple[str, ...]
     requires: tuple[str, ...]
-    conflicts: tuple[str, ...]
     description: str
 
 
@@ -87,15 +86,14 @@ def load_components(path: Path) -> dict[str, Component]:
             continue
 
         fields = line.split("|")
-        if len(fields) != 5:
+        if len(fields) != 4:
             die(f"Invalid components row in {path}: {line}")
 
-        name, allowed_bases, requires, conflicts, description = fields
+        name, allowed_bases, requires, description = fields
         components[name] = Component(
             name=name,
             allowed_bases=("*",) if allowed_bases == "*" else split_csv(allowed_bases),
             requires=split_csv(requires),
-            conflicts=split_csv(conflicts),
             description=description,
         )
 
@@ -202,10 +200,6 @@ def validate_selection(
                     "Try:\n"
                     f"  khzhao run new-project {family} <name> --base {base} --with {suggestion}"
                 )
-
-        for conflict in component.conflicts:
-            if conflict in selected_set:
-                die(f"Component `{name}` conflicts with component `{conflict}`.")
 
     output_dir = Path(project_slug(raw_name))
     if output_dir.exists() and not force:

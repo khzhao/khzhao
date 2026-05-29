@@ -6,10 +6,6 @@ die() {
   exit 1
 }
 
-warn() {
-  echo "install.sh: $*" >&2
-}
-
 resolve_script_dir() {
   local source dir link
   source="${BASH_SOURCE[0]:-}"
@@ -36,6 +32,8 @@ default_repo_url() {
 }
 
 ensure_repo_checkout() {
+  command -v git >/dev/null 2>&1 || die "git is required to install khzhao"
+
   if [ -d "$KHZHAO_REPO/.git" ]; then
     local target
     git -C "$KHZHAO_REPO" fetch --prune
@@ -66,26 +64,9 @@ repo_reset_target() {
   printf 'origin/%s\n' "$branch"
 }
 
-run_package_install() {
-  local install_root
-  install_root="$1"
-
-  if [ "$SKIP_PACKAGES" -eq 1 ]; then
-    return 0
-  fi
-
-  if [ ! -f "$install_root/install/run.sh" ] || [ ! -r "$install_root/share/manifest/packages.psv" ]; then
-    return 2
-  fi
-
-  # shellcheck source=install/run.sh
-  . "$install_root/install/run.sh"
-  install_packages "$install_root/share/manifest/packages.psv" "$FORCE_PACKAGES"
-}
-
 usage() {
   cat <<'EOF'
-usage: install.sh [--skip-packages] [--force]
+usage: install.sh [--skip-tools]
 
 Environment:
   KHZHAO_HOME      install root, defaults to ~/.khzhao
@@ -97,16 +78,17 @@ SCRIPT_DIR="$(resolve_script_dir || true)"
 KHZHAO_HOME="${KHZHAO_HOME:-$HOME/.khzhao}"
 KHZHAO_REPO="$KHZHAO_HOME/repo"
 KHZHAO_REPO_URL="${KHZHAO_REPO_URL:-$(default_repo_url)}"
-SKIP_PACKAGES=0
-FORCE_PACKAGES=0
+SKIP_TOOLS=0
+FORCE_INSTALL=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
-    --skip-packages)
-      SKIP_PACKAGES=1
+    --skip-tools)
+      SKIP_TOOLS=1
       ;;
     --force)
-      FORCE_PACKAGES=1
+      # Accepted for compatibility with older installers. khzhao uses it to refresh managed shell blocks.
+      FORCE_INSTALL=1
       ;;
     -h|--help)
       usage
@@ -123,29 +105,17 @@ mkdir -p \
   "$KHZHAO_HOME" \
   "$KHZHAO_HOME/state" \
   "$KHZHAO_HOME/backups" \
-  "$KHZHAO_HOME/logs" \
   "$KHZHAO_HOME/tmp"
-
-PACKAGES_INSTALLED=0
-if [ -n "$SCRIPT_DIR" ]; then
-  PACKAGES_INSTALLED=1
-  run_package_install "$SCRIPT_DIR" || {
-    status="$?"
-    [ "$status" -eq 2 ] || exit "$status"
-    PACKAGES_INSTALLED=0
-  }
-fi
 
 ensure_repo_checkout
 
-if [ "$PACKAGES_INSTALLED" -eq 0 ]; then
-  run_package_install "$KHZHAO_REPO" || {
-    status="$?"
-    [ "$status" -eq 2 ] && warn "package adapters not found; skipping dependency install" || exit "$status"
-  }
+set --
+if [ "$SKIP_TOOLS" -eq 1 ]; then
+  set -- "$@" --skip-tools
 fi
-
-mkdir -p "$HOME/.local/bin"
-ln -sfn "$KHZHAO_REPO/khzhao" "$HOME/.local/bin/khzhao"
-
-"$KHZHAO_REPO/khzhao" install
+if [ "$FORCE_INSTALL" -eq 1 ]; then
+  set -- "$@" --force
+fi
+KHZHAO_HOME="$KHZHAO_HOME" \
+KHZHAO_REPO="$KHZHAO_REPO" \
+  "$KHZHAO_REPO/khzhao" install "$@"
