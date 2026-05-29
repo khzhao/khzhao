@@ -2,6 +2,246 @@ syntax on
 
 set mouse=a
 
+let s:khzhao_vim_home = empty($KHZHAO_HOME) ? expand('~/.khzhao/vim') : $KHZHAO_HOME . '/vim'
+execute 'set runtimepath^=' . fnameescape(s:khzhao_vim_home)
+
+call plug#begin(s:khzhao_vim_home . '/plugged')
+Plug 'preservim/nerdtree'
+Plug 'ap/vim-buftabline'
+call plug#end()
+
+" NERDTree file explorer.
+let g:NERDTreeWinPos = 'left'
+let g:NERDTreeWinSize = 30
+let g:NERDTreeQuitOnOpen = 0
+let g:NERDTreeChDirMode = 0
+let g:khzhao_nerdtree_root = getcwd()
+
+function! s:IsGitEditorBuffer() abort
+  let l:name = expand('%:t')
+  let l:path = expand('%:p')
+
+  if &filetype ==# 'gitcommit' || &filetype ==# 'gitrebase'
+    return 1
+  endif
+
+  if l:name =~# '\v^(COMMIT_EDITMSG|MERGE_MSG|TAG_EDITMSG|SQUASH_MSG|git-rebase-todo)(\.backup)?$'
+    return 1
+  endif
+
+  return l:path =~# '\v/\.git/(rebase-merge|rebase-apply)/'
+endfunction
+
+function! s:ListedFileBuffers() abort
+  return filter(range(1, bufnr('$')), 'buflisted(v:val) && getbufvar(v:val, "&buftype") ==# "" && getbufvar(v:val, "&filetype") !=# "nerdtree" && (!empty(bufname(v:val)) || getbufvar(v:val, "&modified"))')
+endfunction
+
+function! s:OpenNERDTree() abort
+  if !exists(':NERDTree') || <SID>IsGitEditorBuffer()
+    return
+  endif
+
+  let l:current_win = win_getid()
+  silent! execute 'NERDTree' fnameescape(g:khzhao_nerdtree_root)
+  call win_gotoid(l:current_win)
+endfunction
+
+function! s:FocusNERDTree() abort
+  call <SID>OpenNERDTree()
+  if exists(':NERDTreeFocus')
+    NERDTreeFocus
+  endif
+endfunction
+
+function! s:DeleteFileBuffer(...) abort
+  let l:bang = get(a:000, 0, 0)
+  let l:return_win = 0
+  if &filetype ==# 'nerdtree'
+    let l:return_win = win_getid()
+    wincmd l
+    if &filetype ==# 'nerdtree'
+      return
+    endif
+  endif
+
+  let l:delete_buf = bufnr('%')
+  if &modified && !l:bang
+    echohl WarningMsg
+    echo 'Buffer has unsaved changes; write or discard before deleting'
+    echohl None
+    if l:return_win
+      call win_gotoid(l:return_win)
+    endif
+    return
+  endif
+
+  silent! bprevious
+  if bufnr('%') == l:delete_buf
+    enew
+  endif
+  execute 'bdelete' . (l:bang ? '!' : '') . ' ' . l:delete_buf
+
+  if l:return_win
+    call win_gotoid(l:return_win)
+  endif
+endfunction
+
+function! s:SmartQuit(bang) abort
+  if tabpagenr('$') > 1
+    execute 'tabclose' . (a:bang ? '!' : '')
+    return
+  endif
+
+  if <SID>IsGitEditorBuffer()
+    execute 'quit' . (a:bang ? '!' : '')
+    return
+  endif
+
+  if empty(<SID>ListedFileBuffers())
+    execute 'quitall' . (a:bang ? '!' : '')
+    return
+  endif
+
+  call <SID>DeleteFileBuffer(a:bang)
+endfunction
+
+function! s:SmartWriteQuit(bang) abort
+  if &buftype ==# '' && &modified
+    execute 'write' . (a:bang ? '!' : '')
+  endif
+
+  call <SID>SmartQuit(a:bang)
+endfunction
+
+function! s:CycleFileBufferFromNERDTree(direction) abort
+  let l:tree_win = win_getid()
+  wincmd l
+
+  if win_getid() == l:tree_win
+    return
+  endif
+
+  if a:direction ==# 'previous'
+    bprevious
+  else
+    bnext
+  endif
+
+  call win_gotoid(l:tree_win)
+endfunction
+
+function! s:SmartQuitCommandEnter() abort
+  if getcmdtype() ==# ':' && getcmdline() =~# '^\s*q\%[uit]!\?\s*$'
+    let l:bang = getcmdline() =~# '!\s*$'
+    return "\<C-U>KhzhaoSmartQuit" . (l:bang ? '!' : '') . "\<CR>"
+  endif
+
+  if getcmdtype() ==# ':' && getcmdline() =~# '^\s*wq!\?\s*$'
+    let l:bang = getcmdline() =~# '!\s*$'
+    return "\<C-U>KhzhaoSmartWriteQuit" . (l:bang ? '!' : '') . "\<CR>"
+  endif
+
+  return "\<CR>"
+endfunction
+
+function! s:ShortenNERDTreeRoot() abort
+  if &filetype !=# 'nerdtree' || !exists('b:NERDTree')
+    return
+  endif
+
+  if get(b:, 'khzhao_shortening_nerdtree_root', 0)
+    return
+  endif
+
+  let l:root_line = b:NERDTree.ui.getRootLineNum()
+  if l:root_line < 1 || l:root_line > line('$')
+    return
+  endif
+
+  let l:root_name = fnamemodify(b:NERDTree.root.path.str(), ':t')
+  if empty(l:root_name)
+    let l:root_name = fnamemodify(b:NERDTree.root.path.str(), ':h:t')
+  endif
+
+  if empty(l:root_name)
+    let l:root_label = '/'
+  else
+    let l:root_label = '/' . l:root_name . '/'
+  endif
+
+  if getline(l:root_line) ==# l:root_label
+    return
+  endif
+
+  let l:was_modifiable = &l:modifiable
+  let l:was_readonly = &l:readonly
+  let b:khzhao_shortening_nerdtree_root = 1
+
+  try
+    setlocal modifiable noreadonly
+    call setline(l:root_line, l:root_label)
+  finally
+    if !l:was_modifiable
+      setlocal nomodifiable
+    endif
+    if l:was_readonly
+      setlocal readonly
+    endif
+    let b:khzhao_shortening_nerdtree_root = 0
+  endtry
+endfunction
+
+function! s:NERDTreeUIRenderWrapper() dict abort
+  call self.khzhao_original_render()
+  call <SID>ShortenNERDTreeRoot()
+endfunction
+
+function! s:WrapNERDTreeRender() abort
+  if &filetype !=# 'nerdtree' || !exists('b:NERDTree') || !has_key(b:NERDTree, 'ui')
+    return
+  endif
+
+  if has_key(b:NERDTree.ui, 'khzhao_original_render')
+    return
+  endif
+
+  let b:NERDTree.ui.khzhao_original_render = b:NERDTree.ui.render
+  let b:NERDTree.ui.render = function('<SID>NERDTreeUIRenderWrapper', [], b:NERDTree.ui)
+endfunction
+
+function! s:PrepareNERDTree() abort
+  call <SID>WrapNERDTreeRender()
+  call <SID>ShortenNERDTreeRoot()
+endfunction
+
+function! s:NERDTreeKeymaps() abort
+  setlocal nowrap
+  call <SID>PrepareNERDTree()
+  nnoremap <buffer> <C-j> 5j
+  nnoremap <buffer> <C-k> 5k
+  nnoremap <buffer> <C-h> 5h
+  nnoremap <buffer> <C-l> 5l
+  nnoremap <buffer> H :call <SID>CycleFileBufferFromNERDTree('previous')<CR>
+  nnoremap <buffer> L :call <SID>CycleFileBufferFromNERDTree('next')<CR>
+  nnoremap <buffer> <silent> q :KhzhaoSmartQuit<CR>
+endfunction
+
+command! -bang KhzhaoSmartQuit call <SID>SmartQuit(<bang>0)
+command! -bang KhzhaoSmartWriteQuit call <SID>SmartWriteQuit(<bang>0)
+cnoremap <expr> <CR> <SID>SmartQuitCommandEnter()
+
+augroup khzhao_nerdtree
+  autocmd!
+  autocmd VimEnter * call <SID>OpenNERDTree()
+  autocmd FileType nerdtree call <SID>NERDTreeKeymaps()
+  autocmd User NERDTreeInit call <SID>PrepareNERDTree()
+  autocmd BufEnter,WinEnter * call <SID>PrepareNERDTree()
+augroup END
+
+nnoremap <leader>n :call <SID>FocusNERDTree()<CR>
+nnoremap <leader>b :buffers<CR>
+nnoremap <leader>x :call <SID>DeleteFileBuffer()<CR>
+
 set number
 set linebreak
 set textwidth=250
@@ -33,8 +273,8 @@ set expandtab
 set pastetoggle=<C-p>
 
 nnoremap <C-t> :tabnew<CR>
-nnoremap H gT
-nnoremap L gt
+nnoremap H :bprevious<CR>
+nnoremap L :bnext<CR>
 vnoremap <C-r> "hy:%s/<C-r>h//gc<left><left><left>
 
 function FormatBuffer()

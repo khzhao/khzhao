@@ -79,6 +79,11 @@ LOCAL_BIN="$HOME/.local/bin"
 DOTFILES_MANIFEST="$KHZHAO_REPO/share/manifest/dotfiles.psv"
 TASKS_MANIFEST="$KHZHAO_REPO/share/manifest/tasks.psv"
 LEDGER="$STATE_DIR/ledger.psv"
+KHZHAO_VIM_HOME="$KHZHAO_HOME/vim"
+VIM_PLUG_URL="https://raw.githubusercontent.com/junegunn/vim-plug/master/plug.vim"
+VIM_PLUG_PATH="$KHZHAO_VIM_HOME/autoload/plug.vim"
+VIM_PLUGIN_DIR="$KHZHAO_VIM_HOME/plugged"
+VIM_PLUGINS="nerdtree vim-buftabline"
 
 ensure_dirs() {
   if [ "$DRY_RUN" -eq 1 ]; then
@@ -349,6 +354,48 @@ ensure_entrypoint() {
   ensure_symlink "entrypoint" "khzhao" "$user_cli" "$repo_cli"
 }
 
+ensure_vim_plug() {
+  if [ -f "$VIM_PLUG_PATH" ]; then
+    return 0
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "curl -fLo $VIM_PLUG_PATH --create-dirs $VIM_PLUG_URL"
+    return 0
+  fi
+
+  command -v curl >/dev/null 2>&1 || die "curl is required to install vim-plug"
+  mkdir -p "$(dirname "$VIM_PLUG_PATH")"
+  curl -fLo "$VIM_PLUG_PATH" --create-dirs "$VIM_PLUG_URL"
+}
+
+vim_plugins_missing() {
+  local plugin
+
+  for plugin in $VIM_PLUGINS; do
+    if [ ! -d "$VIM_PLUGIN_DIR/$plugin" ]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+install_vim_plugins() {
+  ensure_vim_plug
+
+  if ! vim_plugins_missing; then
+    return 0
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "KHZHAO_HOME=$KHZHAO_HOME vim -Nu $KHZHAO_REPO/share/dotfiles/vimrc -n -es +'PlugInstall --sync' +'qall!'"
+    return 0
+  fi
+
+  KHZHAO_HOME="$KHZHAO_HOME" vim -Nu "$KHZHAO_REPO/share/dotfiles/vimrc" -n -es +'PlugInstall --sync' +'qall!'
+}
+
 cmd_install() {
   local only
   DRY_RUN=0
@@ -377,6 +424,9 @@ cmd_install() {
 
   ensure_dirs
   install_dotfiles "$only"
+  if [ -z "$only" ] || [ "$only" = "vimrc" ]; then
+    install_vim_plugins
+  fi
   ensure_entrypoint
   ensure_path_block
 }
@@ -512,6 +562,33 @@ safe_remove_khzhao_home() {
   fi
 }
 
+remove_file_if_exists() {
+  local path
+  path="$1"
+
+  if [ ! -e "$path" ] && [ ! -L "$path" ]; then
+    return 0
+  fi
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "rm -f $path"
+  else
+    rm -f "$path"
+  fi
+}
+
+remove_vim_artifacts() {
+  if [ -d "$KHZHAO_VIM_HOME" ] || [ -L "$KHZHAO_VIM_HOME" ]; then
+    if [ "$DRY_RUN" -eq 1 ]; then
+      echo "rm -rf $KHZHAO_VIM_HOME"
+    else
+      rm -rf "$KHZHAO_VIM_HOME"
+    fi
+  fi
+
+  remove_file_if_exists "$HOME/.NERDTreeBookmarks"
+}
+
 cmd_uninstall() {
   local restore user_cli repo_cli path_target
   DRY_RUN=0
@@ -540,6 +617,7 @@ cmd_uninstall() {
   if [ "$(block_count "path" "$path_target")" != "0" ]; then
     remove_block_from_file "path" "$path_target"
   fi
+  remove_vim_artifacts
   remove_symlink_if_managed "$user_cli" "$repo_cli"
 
   if [ "$restore" -eq 1 ]; then

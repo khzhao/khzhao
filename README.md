@@ -27,6 +27,7 @@ Install creates:
 ```text
 ~/.khzhao/
   repo/
+  vim/
   state/
   backups/
   logs/
@@ -41,14 +42,24 @@ Command entrypoint:
 
 Required packages: `git`, `curl`, `uv`, `node`/`npm`.
 
-Missing packages prompt with `[Y/n]`; `--force` answers yes. Existing `node`/`npm` installations are reused. If Node is missing, khzhao installs `nvm` and uses it to install latest LTS Node. Packages are not khzhao-owned.
+Missing packages prompt with `[Y/n]`; `--force` answers yes. Existing `node`/`npm` installations are reused. If Node is missing, khzhao installs `nvm` and uses it to install latest LTS Node. Packages are not khzhao-owned. Vim is assumed to already exist on the machine.
+
+Vim plugins are khzhao-owned and installed under:
+
+```text
+~/.khzhao/vim/
+  autoload/plug.vim
+  plugged/
+```
+
+The managed Vim config uses vim-plug to install NERDTree and vim-buftabline. `khzhao install` bootstraps vim-plug and runs `PlugInstall` when installing the Vim config.
 
 ## Commands
 
 ```bash
-khzhao install
+khzhao install [--dry-run] [--force] [--only <name>]
 khzhao update [--dry-run]
-khzhao uninstall
+khzhao uninstall [--dry-run] [--restore-backups]
 khzhao info
 khzhao run <task> [...]
 khzhao list
@@ -57,6 +68,26 @@ khzhao help
 ```
 
 `khzhao update` fast-forwards `~/.khzhao/repo` and reruns `khzhao install`.
+
+## Dotfiles
+
+Managed symlinks:
+
+- `~/.vimrc`
+- `~/.gitconfig`
+- `~/.gitignore_global`
+- `~/.tmux.conf`
+
+Managed shell blocks:
+
+- `~/.bashrc`
+- `~/.zshrc`
+
+Install one dotfile by manifest name:
+
+```bash
+khzhao install --only vimrc
+```
 
 ## Uninstall
 
@@ -69,10 +100,12 @@ Removes khzhao-owned artifacts:
 
 - managed dotfile symlinks
 - managed shell blocks
+- managed Vim plugins under `~/.khzhao/vim`
+- `~/.NERDTreeBookmarks`
 - `~/.local/bin/khzhao`
 - `~/.khzhao`
 
-Does not remove global/user packages or generated projects.
+Does not remove global/user packages, generated projects, or unrelated `~/.vim` files.
 
 ## Project Templates
 
