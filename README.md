@@ -72,6 +72,7 @@ Editor profile:
 khzhao install [--dry-run] [--skip-tools] [--only <name>]
 khzhao update [--dry-run]
 khzhao uninstall [--dry-run] [--restore-backups]
+khzhao cheatsheet [--path]
 khzhao info
 khzhao list
 khzhao doctor
@@ -83,6 +84,7 @@ Examples:
 ```bash
 khzhao install --only zim
 khzhao update
+khzhao cheatsheet
 khzhao doctor
 zim
 ```

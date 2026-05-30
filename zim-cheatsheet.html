@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Zim Neovim Cheatsheet</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #15181c;
+      --panel: #1f242a;
+      --panel-soft: #242a31;
+      --text: #eef2f6;
+      --muted: #a9b3bd;
+      --line: #343b44;
+      --cyan: #7dd3fc;
+      --green: #86efac;
+      --amber: #f6c177;
+      --pink: #f0abfc;
+      --red: #fda4af;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.45;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: #111418;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .wrap {
+      width: min(1180px, calc(100% - 32px));
+      margin: 0 auto;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: 1fr minmax(220px, 340px);
+      gap: 16px;
+      align-items: center;
+      padding: 18px 0;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 44px);
+      line-height: 1.05;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      margin: 8px 0 0;
+      color: var(--muted);
+      max-width: 760px;
+      font-size: 15px;
+    }
+
+    .search {
+      width: 100%;
+      height: 42px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 0 12px;
+      font: inherit;
+      outline: none;
+    }
+
+    .search:focus {
+      border-color: var(--cyan);
+    }
+
+    main {
+      padding: 24px 0 48px;
+    }
+
+    .quick {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 24px;
+    }
+
+    .quick-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 12px;
+      min-height: 76px;
+    }
+
+    .quick-label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .quick-value {
+      margin-top: 8px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .wide {
+      grid-column: 1 / -1;
+    }
+
+    section {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      overflow: hidden;
+    }
+
+    section h2 {
+      margin: 0;
+      padding: 13px 14px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel-soft);
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    tr {
+      border-bottom: 1px solid rgba(52, 59, 68, .7);
+    }
+
+    tr:last-child {
+      border-bottom: 0;
+    }
+
+    td {
+      padding: 9px 14px;
+      vertical-align: top;
+    }
+
+    td:first-child {
+      width: 180px;
+      white-space: nowrap;
+    }
+
+    kbd {
+      display: inline-block;
+      min-width: 26px;
+      padding: 3px 7px;
+      border: 1px solid #48515c;
+      border-bottom-color: #222830;
+      border-radius: 6px;
+      background: #111418;
+      color: var(--cyan);
+      font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.25;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .cmd {
+      color: var(--green);
+    }
+
+    .warn kbd {
+      color: var(--amber);
+    }
+
+    .danger kbd {
+      color: var(--red);
+    }
+
+    .note {
+      margin-top: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #171f24;
+      color: var(--muted);
+      padding: 14px;
+      font-size: 14px;
+    }
+
+    .note strong {
+      color: var(--text);
+    }
+
+    .section-note {
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      padding: 11px 14px;
+      font-size: 14px;
+      background: #1a2026;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      padding: 14px;
+    }
+
+    .step {
+      border: 1px solid rgba(52, 59, 68, .9);
+      border-radius: 8px;
+      background: #171b20;
+      padding: 12px;
+      min-height: 110px;
+    }
+
+    .step-title {
+      color: var(--amber);
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+
+    .step p {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 860px) {
+      .topbar,
+      .grid,
+      .quick {
+        grid-template-columns: 1fr;
+      }
+
+      .flow {
+        grid-template-columns: 1fr;
+      }
+
+      td:first-child {
+        width: 132px;
+      }
+    }
+
+    @media print {
+      header {
+        position: static;
+      }
+
+      body {
+        background: white;
+        color: black;
+      }
+
+      section,
+      .quick-item,
+      .note {
+        break-inside: avoid;
+        background: white;
+        color: black;
+      }
+
+      kbd {
+        color: black;
+        background: white;
+      }
+
+      .search {
+        display: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap topbar">
+      <div>
+        <h1>Zim Neovim Cheatsheet</h1>
+        <p class="subtitle">Bindings for the khzhao `zim` profile: NVChad defaults plus your custom navigation, buffer, tab, tree, and terminal workflow.</p>
+      </div>
+      <input id="filter" class="search" type="search" placeholder="Filter commands...">
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div class="quick">
+      <div class="quick-item" data-search="leader space">
+        <div class="quick-label">Leader</div>
+        <div class="quick-value"><kbd>Space</kbd></div>
+      </div>
+      <div class="quick-item" data-search="open zim project">
+        <div class="quick-label">Open Project</div>
+        <div class="quick-value"><kbd class="cmd">zim .</kbd></div>
+      </div>
+      <div class="quick-item" data-search="file tree toggle">
+        <div class="quick-label">File Tree</div>
+        <div class="quick-value"><kbd>Ctrl-n</kbd></div>
+      </div>
+      <div class="quick-item" data-search="close buffer">
+        <div class="quick-label">Close Buffer</div>
+        <div class="quick-value"><kbd>Space</kbd> <kbd>x</kbd></div>
+      </div>
+    </div>
+
+    <div class="grid">
+      <section data-section>
+        <h2>Your Zim Bindings</h2>
+        <table>
+          <tr data-search="move down five lines"><td><kbd>Ctrl-j</kbd></td><td>Move down 5 lines.</td></tr>
+          <tr data-search="move up five lines"><td><kbd>Ctrl-k</kbd></td><td>Move up 5 lines.</td></tr>
+          <tr data-search="move left five chars"><td><kbd>Ctrl-h</kbd></td><td>Move left 5 characters.</td></tr>
+          <tr data-search="move right five chars"><td><kbd>Ctrl-l</kbd></td><td>Move right 5 characters.</td></tr>
+          <tr data-search="escape insert mode"><td><kbd>F</kbd><kbd>F</kbd></td><td>Leave insert mode.</td></tr>
+          <tr data-search="paste toggle"><td><kbd>Ctrl-p</kbd></td><td>Toggle paste mode.</td></tr>
+          <tr data-search="window split move option meta left"><td><kbd>Meta-h</kbd></td><td>Move to split on the left.</td></tr>
+          <tr data-search="window split move option meta down"><td><kbd>Meta-j</kbd></td><td>Move to split below.</td></tr>
+          <tr data-search="window split move option meta up"><td><kbd>Meta-k</kbd></td><td>Move to split above.</td></tr>
+          <tr data-search="window split move option meta right"><td><kbd>Meta-l</kbd></td><td>Move to split on the right.</td></tr>
+        </table>
+        <div class="section-note">These are repo-owned mappings from <kbd class="cmd">share/configs/zim/lua/mappings.lua</kbd>. They override or add to NVChad defaults.</div>
+      </section>
+
+      <section data-section>
+        <h2>Buffers, Tabs, Windows</h2>
+        <table>
+          <tr data-search="previous buffer file"><td><kbd>H</kbd></td><td>Previous buffer/file.</td></tr>
+          <tr data-search="next buffer file"><td><kbd>L</kbd></td><td>Next buffer/file.</td></tr>
+          <tr data-search="new tab"><td><kbd>Ctrl-t</kbd></td><td>Create a new real Neovim tab.</td></tr>
+          <tr data-search="next tab"><td><kbd>Tab</kbd></td><td>Next real Neovim tab.</td></tr>
+          <tr data-search="previous tab"><td><kbd>Shift-Tab</kbd></td><td>Previous real Neovim tab.</td></tr>
+          <tr data-search="close buffer file"><td><kbd>Space</kbd> <kbd>x</kbd></td><td>Close the current buffer/file.</td></tr>
+          <tr data-search="close window quit"><td><kbd class="cmd">:q</kbd></td><td>Close the current window/split.</td></tr>
+          <tr data-search="native split navigation"><td><kbd>Ctrl-w</kbd> <kbd>h/j/k/l</kbd></td><td>Native split navigation.</td></tr>
+          <tr data-search="split horizontal"><td><kbd class="cmd">:sp</kbd></td><td>Create a horizontal split.</td></tr>
+          <tr data-search="split vertical"><td><kbd class="cmd">:vsp</kbd></td><td>Create a vertical split.</td></tr>
+          <tr data-search="window cycle"><td><kbd>Ctrl-w</kbd> <kbd>w</kbd></td><td>Cycle between windows.</td></tr>
+          <tr data-search="quit all"><td><kbd class="cmd">:qa</kbd></td><td>Quit all windows.</td></tr>
+        </table>
+        <div class="section-note"><strong>Model:</strong> buffers are files, windows are panes, tabs are workspaces. Use <kbd>H</kbd>/<kbd>L</kbd> for files most of the time.</div>
+      </section>
+
+      <section data-section>
+        <h2>nvim-tree</h2>
+        <table>
+          <tr data-search="toggle file tree"><td><kbd>Ctrl-n</kbd></td><td>Toggle file tree.</td></tr>
+          <tr data-search="focus file tree"><td><kbd>Space</kbd> <kbd>e</kbd></td><td>Focus file tree.</td></tr>
+          <tr data-search="close file tree"><td><kbd>q</kbd></td><td>Close tree window.</td></tr>
+          <tr data-search="help tree"><td><kbd>g?</kbd></td><td>Show tree help.</td></tr>
+          <tr data-search="open expand folder file"><td><kbd>Enter</kbd> or <kbd>o</kbd></td><td>Open file or expand folder.</td></tr>
+          <tr data-search="preview file"><td><kbd>Tab</kbd></td><td>Preview file without committing to a normal open.</td></tr>
+          <tr data-search="close directory parent"><td><kbd>Backspace</kbd></td><td>Close directory or go up.</td></tr>
+          <tr data-search="open vertical split"><td><kbd>Ctrl-v</kbd></td><td>Open selected file in a vertical split.</td></tr>
+          <tr data-search="open horizontal split"><td><kbd>Ctrl-x</kbd></td><td>Open selected file in a horizontal split.</td></tr>
+          <tr data-search="open new tab"><td><kbd>Ctrl-t</kbd></td><td>Open selected file in a new tab.</td></tr>
+          <tr data-search="change root parent"><td><kbd>-</kbd></td><td>Change tree root to parent directory.</td></tr>
+          <tr data-search="change root node cd"><td><kbd>Ctrl-]</kbd></td><td>Change tree root to selected directory.</td></tr>
+          <tr data-search="search node"><td><kbd>S</kbd></td><td>Search for a node in the tree.</td></tr>
+          <tr data-search="expand all"><td><kbd>E</kbd></td><td>Expand the whole tree.</td></tr>
+          <tr data-search="collapse all"><td><kbd>W</kbd></td><td>Collapse the whole tree.</td></tr>
+          <tr data-search="create file directory"><td><kbd>a</kbd></td><td>Create file or directory.</td></tr>
+          <tr data-search="rename"><td><kbd>r</kbd></td><td>Rename node.</td></tr>
+          <tr data-search="rename basename"><td><kbd>e</kbd></td><td>Rename basename only.</td></tr>
+          <tr data-search="rename omit filename"><td><kbd>Ctrl-r</kbd></td><td>Rename path while omitting filename.</td></tr>
+          <tr data-search="delete"><td><kbd>d</kbd></td><td>Delete node.</td></tr>
+          <tr data-search="trash"><td><kbd>D</kbd></td><td>Trash node if trash support is available.</td></tr>
+          <tr data-search="cut copy paste"><td><kbd>x</kbd> <kbd>c</kbd> <kbd>p</kbd></td><td>Cut, copy, paste nodes.</td></tr>
+          <tr data-search="copy filename relative absolute basename"><td><kbd>y</kbd> <kbd>Y</kbd> <kbd>gy</kbd> <kbd>ge</kbd></td><td>Copy filename, relative path, absolute path, or basename.</td></tr>
+          <tr data-search="refresh"><td><kbd>R</kbd></td><td>Refresh tree.</td></tr>
+          <tr data-search="toggle dotfiles"><td><kbd>H</kbd></td><td>Toggle dotfiles in the tree.</td></tr>
+          <tr data-search="toggle git ignored"><td><kbd>I</kbd></td><td>Toggle git ignored files.</td></tr>
+          <tr data-search="toggle git clean filter"><td><kbd>C</kbd></td><td>Toggle git-clean filter.</td></tr>
+          <tr data-search="live filter"><td><kbd>f</kbd> / <kbd>F</kbd></td><td>Start or clear live filter.</td></tr>
+          <tr data-search="git navigation diagnostics"><td><kbd>[c</kbd> <kbd>]c</kbd> <kbd>[e</kbd> <kbd>]e</kbd></td><td>Previous/next git change or diagnostic.</td></tr>
+          <tr data-search="bookmark marks"><td><kbd>m</kbd></td><td>Toggle bookmark/mark on node.</td></tr>
+          <tr data-search="first last sibling"><td><kbd>J</kbd> <kbd>K</kbd></td><td>Jump to last or first sibling.</td></tr>
+          <tr data-search="toggle group empty"><td><kbd>L</kbd></td><td>Toggle grouped empty folders. NVChad sets <kbd class="cmd">root_folder_label=false</kbd>; grouped empty folders are not enabled by default.</td></tr>
+          <tr data-search="tree move up five lines conflict"><td><kbd>Ctrl-k</kbd></td><td>Custom override: move up 5 lines instead of nvim-tree Info.</td></tr>
+        </table>
+        <div class="section-note">Tree windows have local mappings. For example, <kbd>H</kbd> toggles dotfiles in the tree, while <kbd>H</kbd> means previous buffer in normal file buffers.</div>
+      </section>
+
+      <section data-section>
+        <h2>Search And Files</h2>
+        <table>
+          <tr data-search="find files telescope"><td><kbd>Space</kbd> <kbd>f</kbd><kbd>f</kbd></td><td>Find files with Telescope.</td></tr>
+          <tr data-search="live grep search project"><td><kbd>Space</kbd> <kbd>f</kbd><kbd>w</kbd></td><td>Live grep project.</td></tr>
+          <tr data-search="find buffers"><td><kbd>Space</kbd> <kbd>f</kbd><kbd>b</kbd></td><td>Find open buffers.</td></tr>
+          <tr data-search="old files recent"><td><kbd>Space</kbd> <kbd>f</kbd><kbd>o</kbd></td><td>Open recent files.</td></tr>
+          <tr data-search="current buffer fuzzy search"><td><kbd>Space</kbd> <kbd>f</kbd><kbd>z</kbd></td><td>Fuzzy search current buffer.</td></tr>
+          <tr data-search="edit file command"><td><kbd class="cmd">:e file</kbd></td><td>Edit/open a file by path.</td></tr>
+          <tr data-search="marks"><td><kbd>Space</kbd> <kbd>m</kbd><kbd>a</kbd></td><td>Find marks.</td></tr>
+          <tr data-search="git commits"><td><kbd>Space</kbd> <kbd>c</kbd><kbd>m</kbd></td><td>Browse git commits.</td></tr>
+          <tr data-search="git status telescope"><td><kbd>Space</kbd> <kbd>g</kbd><kbd>t</kbd></td><td>Browse git status.</td></tr>
+          <tr data-search="help tags"><td><kbd>Space</kbd> <kbd>f</kbd><kbd>h</kbd></td><td>Search help tags.</td></tr>
+          <tr data-search="telescope cancel close"><td><kbd>Esc</kbd> or <kbd>Ctrl-c</kbd></td><td>Close a Telescope picker.</td></tr>
+          <tr data-search="telescope select"><td><kbd>Enter</kbd></td><td>Select current Telescope result.</td></tr>
+          <tr data-search="telescope move selection"><td><kbd>Ctrl-j</kbd> <kbd>Ctrl-k</kbd></td><td>Move selection in many Telescope prompts.</td></tr>
+        </table>
+      </section>
+
+      <section data-section>
+        <h2>Code And UI</h2>
+        <table>
+          <tr data-search="toggle comment"><td><kbd>Space</kbd> <kbd>/</kbd></td><td>Toggle comment.</td></tr>
+          <tr data-search="format file"><td><kbd>Space</kbd> <kbd>f</kbd><kbd>m</kbd></td><td>Format current file.</td></tr>
+          <tr data-search="line numbers"><td><kbd>Space</kbd> <kbd>n</kbd></td><td>Toggle line numbers.</td></tr>
+          <tr data-search="relative line numbers"><td><kbd>Space</kbd> <kbd>r</kbd><kbd>n</kbd></td><td>Toggle relative line numbers.</td></tr>
+          <tr data-search="cheatsheet nvchad"><td><kbd>Space</kbd> <kbd>c</kbd><kbd>h</kbd></td><td>Open NVChad cheatsheet.</td></tr>
+          <tr data-search="clear search highlights"><td><kbd>Esc</kbd></td><td>Clear search highlights in normal mode.</td></tr>
+          <tr data-search="save file"><td><kbd>Ctrl-s</kbd></td><td>Save file.</td></tr>
+          <tr data-search="copy whole file"><td><kbd>Ctrl-c</kbd></td><td>Copy whole file to clipboard if clipboard support is available.</td></tr>
+          <tr data-search="diagnostic loclist"><td><kbd>Space</kbd> <kbd>d</kbd><kbd>s</kbd></td><td>Send diagnostics to location list.</td></tr>
+          <tr data-search="theme picker"><td><kbd>Space</kbd> <kbd>t</kbd><kbd>h</kbd></td><td>Open NVChad theme picker.</td></tr>
+        </table>
+        <div class="section-note">HTML/CSS LSP support may require Mason packages such as <kbd class="cmd">html-lsp</kbd> and <kbd class="cmd">css-lsp</kbd>. Syntax highlighting still works without them.</div>
+      </section>
+
+      <section data-section>
+        <h2>Terminal</h2>
+        <table>
+          <tr data-search="horizontal terminal"><td><kbd>Space</kbd> <kbd>h</kbd></td><td>Open a new horizontal terminal.</td></tr>
+          <tr data-search="vertical terminal"><td><kbd>Space</kbd> <kbd>v</kbd></td><td>Open a new vertical terminal.</td></tr>
+          <tr data-search="floating terminal"><td><kbd>Meta-i</kbd></td><td>Toggle floating terminal.</td></tr>
+          <tr data-search="leave terminal mode"><td><kbd>Ctrl-\</kbd> <kbd>Ctrl-n</kbd></td><td>Leave terminal mode for normal mode.</td></tr>
+          <tr data-search="nvchad terminal escape"><td><kbd>Ctrl-x</kbd></td><td>NVChad terminal-mode shortcut to leave terminal mode.</td></tr>
+          <tr data-search="enter terminal mode"><td><kbd>i</kbd></td><td>Re-enter terminal mode while focused on terminal buffer.</td></tr>
+          <tr data-search="close shell terminal"><td><kbd class="cmd">exit</kbd></td><td>Close the shell inside the terminal.</td></tr>
+          <tr data-search="pick hidden terminal"><td><kbd>Space</kbd> <kbd>p</kbd><kbd>t</kbd></td><td>Pick hidden terminal buffers with Telescope.</td></tr>
+        </table>
+      </section>
+
+      <section class="wide" data-section>
+        <h2>Core Vim That Still Applies</h2>
+        <table>
+          <tr data-search="normal insert visual command modes"><td><kbd>i</kbd> <kbd>v</kbd> <kbd>:</kbd></td><td>Insert mode, visual mode, and command mode are unchanged.</td></tr>
+          <tr data-search="word motion"><td><kbd>w</kbd> <kbd>b</kbd> <kbd>e</kbd></td><td>Move by words.</td></tr>
+          <tr data-search="file top bottom"><td><kbd>gg</kbd> <kbd>G</kbd></td><td>Go to top or bottom of file.</td></tr>
+          <tr data-search="line start end"><td><kbd>0</kbd> <kbd>^</kbd> <kbd>$</kbd></td><td>Line start, first non-blank, and line end.</td></tr>
+          <tr data-search="search next previous"><td><kbd>/</kbd> <kbd>n</kbd> <kbd>N</kbd></td><td>Search, next match, previous match.</td></tr>
+          <tr data-search="yank delete change paste"><td><kbd>y</kbd> <kbd>d</kbd> <kbd>c</kbd> <kbd>p</kbd></td><td>Yank, delete, change, paste.</td></tr>
+          <tr data-search="undo redo"><td><kbd>u</kbd> <kbd>Ctrl-r</kbd></td><td>Undo and redo.</td></tr>
+          <tr data-search="save quit write"><td><kbd class="cmd">:w</kbd> <kbd class="cmd">:wq</kbd> <kbd class="cmd">:q!</kbd></td><td>Save, save and quit, force quit current window.</td></tr>
+        </table>
+      </section>
+
+      <section class="wide" data-section>
+        <h2>Common Workflows</h2>
+        <div class="flow">
+          <div class="step" data-search="open project workflow">
+            <div class="step-title">Open A Project</div>
+            <kbd class="cmd">zim .</kbd>
+            <p>Then use <kbd>Ctrl-n</kbd> for the tree or <kbd>Space</kbd> <kbd>f</kbd><kbd>f</kbd> for file search.</p>
+          </div>
+          <div class="step" data-search="switch files workflow">
+            <div class="step-title">Switch Files</div>
+            <kbd>H</kbd> <kbd>L</kbd>
+            <p>Use buffers for files. Use real tabs only when you want separate workspace layouts.</p>
+          </div>
+          <div class="step" data-search="edit from tree workflow">
+            <div class="step-title">Open From Tree</div>
+            <kbd>Ctrl-n</kbd> <kbd>Enter</kbd>
+            <p><kbd>Tab</kbd> previews from the tree. <kbd>Enter</kbd> opens the file as a normal buffer.</p>
+          </div>
+          <div class="step" data-search="search repo workflow">
+            <div class="step-title">Search The Repo</div>
+            <kbd>Space</kbd> <kbd>f</kbd><kbd>w</kbd>
+            <p>Use live grep for text search. Press <kbd>Ctrl-c</kbd> to cancel the picker.</p>
+          </div>
+          <div class="step" data-search="terminal workflow">
+            <div class="step-title">Terminal Flow</div>
+            <kbd>Space</kbd> <kbd>h</kbd>
+            <p>Leave terminal mode with <kbd>Ctrl-\</kbd> <kbd>Ctrl-n</kbd>; press <kbd>i</kbd> to re-enter.</p>
+          </div>
+          <div class="step" data-search="first run plugins lazy">
+            <div class="step-title">First Launch</div>
+            <kbd>q</kbd>
+            <p>If Lazy.nvim opens while installing plugins, wait for completion and press <kbd>q</kbd>. Restart <kbd class="cmd">zim</kbd> if needed.</p>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <div class="note">
+      <strong>Gotchas:</strong>
+      Leader is <kbd>Space</kbd>, not backslash. <kbd class="cmd">:q</kbd> closes a window; <kbd>Space</kbd> <kbd>x</kbd> closes a buffer. <kbd class="cmd">:E</kbd> is not the file tree in this profile; use <kbd>Ctrl-n</kbd> or <kbd>Space</kbd> <kbd>e</kbd>. In nvim-tree, <kbd>Tab</kbd> previews; <kbd>Enter</kbd> opens normally. Icon boxes usually mean your local terminal is not using a Nerd Font.
+    </div>
+  </main>
+
+  <script>
+    const input = document.getElementById("filter");
+    const searchable = Array.from(document.querySelectorAll("[data-search]"));
+    const sections = Array.from(document.querySelectorAll("[data-section]"));
+
+    input.addEventListener("input", () => {
+      const term = input.value.trim().toLowerCase();
+
+      searchable.forEach(item => {
+        const haystack = `${item.textContent} ${item.dataset.search}`.toLowerCase();
+        item.classList.toggle("hidden", term !== "" && !haystack.includes(term));
+      });
+
+      sections.forEach(section => {
+        const rows = Array.from(section.querySelectorAll("tr"));
+        section.classList.toggle("hidden", rows.length > 0 && rows.every(row => row.classList.contains("hidden")));
+      });
+    });
+  </script>
+</body>
+</html>

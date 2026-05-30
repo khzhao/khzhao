@@ -1003,6 +1003,45 @@ cmd_info() {
   fi
 }
 
+cmd_cheatsheet() {
+  local file
+
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --path|--print)
+        printf '%s\n' "$KHZHAO_REPO/zim-cheatsheet.html"
+        return 0
+        ;;
+      -h|--help)
+        cat <<'EOF'
+usage: khzhao cheatsheet [--path]
+
+Open the zim Neovim cheatsheet in the default browser.
+
+Options:
+  --path, --print   print the cheatsheet path instead of opening it
+EOF
+        return 0
+        ;;
+      *)
+        die "unknown cheatsheet argument: $1"
+        ;;
+    esac
+    shift
+  done
+
+  file="$KHZHAO_REPO/zim-cheatsheet.html"
+  [ -f "$file" ] || die "cheatsheet not found: $file"
+
+  if command -v open >/dev/null 2>&1; then
+    open "$file"
+  elif command -v xdg-open >/dev/null 2>&1; then
+    xdg-open "$file"
+  else
+    printf '%s\n' "$file"
+  fi
+}
+
 cmd_help() {
   cat <<'EOF'
 usage: khzhao <command> [args...]
@@ -1011,6 +1050,7 @@ Commands:
   install [--dry-run] [--skip-tools] [--only <name>]
   update [--dry-run]
   uninstall [--dry-run] [--restore-backups]
+  cheatsheet [--path]
   info
   run <task-name> [args...]
   list
@@ -1019,6 +1059,7 @@ Commands:
 
 Examples:
   khzhao update
+  khzhao cheatsheet
   khzhao run new-project python mypkg
   khzhao run new-project cpp mylib
 EOF
@@ -1033,6 +1074,7 @@ case "$command" in
   install) cmd_install "$@" ;;
   update) cmd_update "$@" ;;
   uninstall) cmd_uninstall "$@" ;;
+  cheatsheet) cmd_cheatsheet "$@" ;;
   info) cmd_info "$@" ;;
   run) cmd_run "$@" ;;
   list) cmd_list "$@" ;;
