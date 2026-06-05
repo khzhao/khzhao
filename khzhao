@@ -253,12 +253,14 @@ append_block_to_file() {
   fi
 
   mkdir -p "$parent"
-  {
-    if [ -s "$target" ]; then
+  if grep -q '[^[:space:]]' "$target" 2>/dev/null; then
+    {
       printf '\n'
-    fi
-    printf '%s\n%s\n%s\n' "$(block_start "$name")" "$body" "$(block_end "$name")"
-  } >> "$target"
+      printf '%s\n%s\n%s\n' "$(block_start "$name")" "$body" "$(block_end "$name")"
+    } >> "$target"
+  else
+    printf '%s\n%s\n%s\n' "$(block_start "$name")" "$body" "$(block_end "$name")" > "$target"
+  fi
 }
 
 ensure_managed_block() {
